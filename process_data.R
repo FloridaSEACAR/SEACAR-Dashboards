@@ -1,9 +1,3 @@
-library(data.table)
-library(dplyr)
-library(stringr)
-library(leaflet)
-library(xlsx)
-
 source("seacar_data_location.R") # import data location variable
 
 files <- list.files(seacar_data_location, full.names = TRUE)
@@ -56,6 +50,13 @@ df <- merge(data, entities[ , c("Entity", "ProgramID")],
             by="ProgramID", all=TRUE)
 df[is.na(Entity), `:=` (Entity = ProgramName)]
 df <- df[!is.na(ProgramLocationID)]
+
+# Entities to highlight
+highlights <- c("Aquatic Preserve Continuous Water Quality Program", 
+                "National Estuarine Research Reserve SWMP")
+
+# Group all others as "Other"
+# df <- df[!Entity %in% highlights, `:=` (Entity = "Other")]
 
 # Create summarised dataframe for use in map
 map_df <- df %>% group_by(ProgramLocationID, ProgramID, ProgramName, Entity) %>%
@@ -112,10 +113,8 @@ leaflet_map <- leaflet_map %>%
                    overlayGroups = entities,
                    options = layersControlOptions(collapsed=TRUE))
 
-
-
-
 # Gantt chart to show Entity timeline
+# Group by Entity to find gaps in coverage by year
 program_years <- df %>%
   group_by(Entity) %>%
   reframe(Years = unique(Year)) %>%
@@ -132,18 +131,50 @@ find_gaps <- function(years) {
   return(data.frame(startYear = start_years, endYear = end_years))
 }
 
-# Apply function to each entity
+# Apply function to each entity (For combined gantt plot)
 df_gaps <- program_years %>%
   group_by(Entity) %>%
   summarize(gap_years = list(find_gaps(Years))) %>%
   unnest(cols = c(gap_years))
 
 df_gaps$Entity <- factor(df_gaps$Entity,
-                         levels = c("AP Continuous WQ Program", "NERR SWMP",
-                                    unique(df_gaps$Entity[!df_gaps$Entity %in% c("AP Continuous WQ Program", "NERR SWMP")])))
+                         levels = c(highlights,
+                                    unique(df_gaps$Entity[
+                                      !df_gaps$Entity %in% highlights])))
+# Apply function to individual stations within each entity (individual gantt plot)
+df_gaps_by_entity <- df %>%
+  group_by(Entity, ProgramLocationID, Region) %>%
+  summarize(gap_years = list(find_gaps(Year))) %>%
+  unnest(cols = c(gap_years))
 
-program_years_plot <- ggplot(df_gaps, aes(x=startYear, xend=endYear, y=Entity, yend=Entity)) +
-  geom_segment(linewidth=4, colour=pal(df_gaps$Entity)) +
-  labs(title="Years of data for each Entity",
-       x="Years",
-       y="Entity")
+# Declare regions
+regions <- c("NW", "NE", "SE", "SW")
+
+pal2 <- colorFactor("Set2", regions)
+
+# Function to serve gannt plots
+plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Program"){
+  if(type=="All"){
+    plot <- ggplot(df_gaps, aes(x=startYear, xend=endYear, y=Entity, yend=Entity)) +
+      geom_segment(linewidth=4, colour=pal(df_gaps$Entity)) +
+      labs(title="Years of data for each Entity",
+           x="Years",
+           y="Entity")
+  } else if(type=="Entity"){
+    filtered_df <- df_gaps_by_entity %>% 
+      filter(Entity==ent) %>% arrange(Region)
+    
+    plot <- ggplot(filtered_df,
+                   aes(x=startYear, xend=endYear, 
+                       y=ProgramLocationID, yend=ProgramLocationID)) +
+      geom_segment(linewidth=4, colour=pal2(filtered_df$Region)) +
+      labs(title=paste0("Years of data for each Station in ", ent),
+           x="Years",
+           y="ProgramLocationID")
+  }
+  return(plot)
+}
+# Define all_entities plot beforehand to save processing
+all_entities_gantt_plot <- plot_gantt(type="All")
+
+plot_gantt(type="Entity")
