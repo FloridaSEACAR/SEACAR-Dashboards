@@ -1,5 +1,21 @@
 source("seacar_data_location.R") # import data location variable
 
+# SEACAR Plot theme
+plot_theme <- theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        text=element_text(family="Arial"),
+        plot.title=element_text(hjust=0.5, size=12, color="#314963"),
+        plot.subtitle=element_text(hjust=0.5, size=10, color="#314963"),
+        legend.title=element_text(size=10),
+        legend.text.align = 0,
+        axis.title.x = element_text(size=10, margin = margin(t = 5, r = 0,
+                                                             b = 10, l = 0)),
+        axis.title.y = element_text(size=10, margin = margin(t = 0, r = 10,
+                                                             b = 0, l = 0)),
+        axis.text=element_text(size=10),
+        axis.text.x=element_text(angle = -45, hjust = 0))
+
 files <- list.files(seacar_data_location, full.names = TRUE)
 cont_files <- str_subset(files, "_cont_") # Locate continuous files only
 
@@ -66,24 +82,31 @@ map_df <- df %>% group_by(ProgramLocationID, ProgramID, ProgramName, Entity) %>%
             YearMax = max(Year),
             N_Data = sum(N_Data),
             Lat = unique(Lat),
-            Lon = unique(Lon), .groups = "keep")
+            Lon = unique(Lon), 
+            Region = unique(Region), .groups = "keep")
 setDT(map_df)
 map_df[is.na(Entity), `:=` (Entity = ProgramName)]
 
-# Set palette and radius (bubble size)
+# Set palette and radius (bubble size) - by Entity
 pal <- colorFactor("viridis", map_df$Entity)
+# New regional palette
+regions <- c("NW", "NE", "SE", "SW")
+pal2 <- colorFactor("Set2", regions)
+region_pal <- pal2(regions)
+names(region_pal) <- regions
 
 # Create popup labels to display metadata info
 map_df <- map_df %>%
   mutate(popup = paste("ProgramID: ", ProgramID,
                        "<br> ProgramName: ", ProgramName,
-                       "<br> ProgLocID: ", ProgramLocationID,
+                       "<br> ProgLocID: <b>", ProgramLocationID,"</b>",
                        "<br> N_Data: ", N_Data,
                        "<br> Years: ", years,
                        "<br> Params: ", params),
          label = paste(ProgramID, ": ", ProgramName, 
                        " - ProgLocID: ", ProgramLocationID),
-         rad = sqrt(N_Data)/100)
+         rad = sqrt(N_Data)/100,
+         region_color = pal2(Region))
 
 # Add commas to large numbers for easier viewing
 map_df$N_Data <- formatC(map_df$N_Data, format="d", big.mark = ",")
@@ -92,9 +115,7 @@ map_df$N_Data <- formatC(map_df$N_Data, format="d", big.mark = ",")
 leaflet_map <- leaflet(map_df) %>%
   addTiles(group = "Default") %>%
   addProviderTiles(providers$CartoDB.PositronNoLabels, 
-                   group = "Positron by CartoDB") %>%
-  addLayersControl(baseGroups = c("Default","Positron by CartoDB"),
-                   options = layersControlOptions(collapsed=TRUE))
+                   group = "Positron by CartoDB")
 
 entities <- unique(map_df$Entity)
 
@@ -106,11 +127,20 @@ for(e in entities){
                      popup = ~popup,
                      label = ~label,
                      group = e)
+  
+  leaflet_map <- leaflet_map %>%
+    addCircleMarkers(data = map_df %>% filter(Entity==e),
+                     lat=~Lat, lng=~Lon, color=~region_color,
+                     weight=1, radius=~rad, fillOpacity=0.4,
+                     popup = ~popup,
+                     label = ~label, 
+                     group=paste0(e, "_by_entity"))
+  
 }
 
 leaflet_map <- leaflet_map %>%
   addLayersControl(baseGroups = c("Default","Positron by CartoDB"),
-                   overlayGroups = entities,
+                   overlayGroups = c(entities, paste0(entities, "_by_entity")),
                    options = layersControlOptions(collapsed=TRUE))
 
 # Gantt chart to show Entity timeline
@@ -141,40 +171,64 @@ df_gaps$Entity <- factor(df_gaps$Entity,
                          levels = c(highlights,
                                     unique(df_gaps$Entity[
                                       !df_gaps$Entity %in% highlights])))
-# Apply function to individual stations within each entity (individual gantt plot)
-df_gaps_by_entity <- df %>%
+
+# Summary stats for each ProgramLocationID within each Entity
+site_years <- df %>%
   group_by(Entity, ProgramLocationID, Region) %>%
-  summarize(gap_years = list(find_gaps(Year))) %>%
-  unnest(cols = c(gap_years))
+  reframe(Years = unique(Year)) %>%
+  arrange(ProgramLocationID, Years)
+setDT(site_years)
 
-# Declare regions
-regions <- c("NW", "NE", "SE", "SW")
+# Apply function to individual stations within each entity (individual gantt plot)
+df_gaps_by_entity <- site_years %>%
+  group_by(Entity, ProgramLocationID, Region) %>%
+  summarize(gap_years = list(find_gaps(Years))) %>%
+  unnest(cols = c(gap_years)) %>%
+  arrange(Region, ProgramLocationID)
 
-pal2 <- colorFactor("Set2", regions)
+# Set factors
+df_gaps_by_entity$Region <- factor(df_gaps_by_entity$Region, levels=regions)
 
 # Function to serve gannt plots
 plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Program"){
   if(type=="All"){
+    
+    min_year <- min(df_gaps$startYear)
+    max_year <- max(df_gaps$endYear)
+    
     plot <- ggplot(df_gaps, aes(x=startYear, xend=endYear, y=Entity, yend=Entity)) +
       geom_segment(linewidth=4, colour=pal(df_gaps$Entity)) +
       labs(title="Years of data for each Entity",
            x="Years",
-           y="Entity")
+           y="Entity") + 
+      scale_x_continuous(limits=c(min_year, max_year),
+                         breaks=seq(max_year, min_year, -1)) +
+      plot_theme
   } else if(type=="Entity"){
     filtered_df <- df_gaps_by_entity %>% 
-      filter(Entity==ent) %>% arrange(Region)
+      filter(Entity==ent)
+    
+    min_year <- min(filtered_df$startYear)
+    max_year <- max(filtered_df$endYear)
     
     plot <- ggplot(filtered_df,
                    aes(x=startYear, xend=endYear, 
                        y=ProgramLocationID, yend=ProgramLocationID)) +
-      geom_segment(linewidth=4, colour=pal2(filtered_df$Region)) +
+      geom_segment(linewidth=4, aes(color=filtered_df$Region)) +
       labs(title=paste0("Years of data for each Station in ", ent),
            x="Years",
-           y="ProgramLocationID")
+           y="ProgramLocationID",
+           color="Region") +
+      scale_y_discrete(limits = unique(filtered_df$ProgramLocationID)) +
+      scale_color_manual(values=region_pal) +
+      scale_x_continuous(limits=c(min_year, max_year),
+                         breaks=seq(max_year, min_year, -2)) +
+      plot_theme
   }
   return(plot)
 }
 # Define all_entities plot beforehand to save processing
 all_entities_gantt_plot <- plot_gantt(type="All")
 
-plot_gantt(type="Entity")
+plot_gantt(type="Entity", ent="Aquatic Preserve Continuous Water Quality Program")
+plot_gantt(type="Entity", ent="National Estuarine Research Reserve SWMP")
