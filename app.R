@@ -13,6 +13,7 @@ library(bslib)
 library(bsicons)
 library(ggplot2)
 library(plotly)
+library(forcats)
 
 # source("process_data.R")
 
@@ -45,12 +46,17 @@ ui <- fluidPage(
   tabsetPanel(
     tabPanel("All",
              fluidRow(
+               actionButton("show_plot", "Show plot")
+             ),
+             fluidRow(
                column(10,
                       plotOutput("gantt_plot")),
                column(2, "hey")
              ))
   )
 )
+
+entities_plus <- paste0(entities, "_by_entity")
 
 server <- function(input, output, session){
   
@@ -67,14 +73,22 @@ server <- function(input, output, session){
   observe({
     if(e()=="All"){
       leafletProxy("map") %>%
-        showGroup(unique(map_df$Entity))
+        showGroup(unique(map_df$Entity)) %>%
+        hideGroup(entities_plus)
     } else {
       leafletProxy("map") %>%
-        showGroup(e()) %>% 
-        hideGroup(entities[!entities %in% e()])
+        showGroup(paste0(e(), "_by_entity")) %>% 
+        hideGroup(entities_plus[!entities_plus %in% paste0(e(), "_by_entity")]) %>%
+        hideGroup(entities)
     }
   })
   
+  observeEvent(input$show_plot, {
+    showModal(modalDialog(title = "Enlarged plot",
+                          renderPlot(plot_gantt(type=type(), ent=e())),
+                          easyClose = TRUE,
+                          size="l"))
+  })
 }
 
 shinyApp(ui = ui, server = server)
