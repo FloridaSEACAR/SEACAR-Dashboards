@@ -1,9 +1,12 @@
 source("seacar_data_location.R") # import data location variable
 
+library(xlsx)
+
 # SEACAR Plot theme
 plot_theme <- theme_bw() +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="gray97"),
         text=element_text(family="Arial"),
         plot.title=element_text(hjust=0.5, size=12, color="#314963"),
         plot.subtitle=element_text(hjust=0.5, size=10, color="#314963"),
@@ -25,7 +28,7 @@ seacar_palette <- c(
   "#F1B8AB",
   "#F8CAAA",
   "#F8E6B9",
-  "#FEFEF1",
+  "#FEEEE1",
   "#DAE9DA",
   "#8BE4C2",
   "#7EE7E8",
@@ -69,10 +72,6 @@ data <- data.table()
 for(p in names(data_directory)){
   data <- bind_rows(data, bind_rows(data_directory[[p]]))
 }
-
-# Entities to highlight
-highlights <- c("Aquatic Preserve Continuous Water Quality Program", 
-                "National Estuarine Research Reserve SWMP")
 
 # Read in excel file of ProgramIDs to be grouped into "Entities"
 # AP Cont. WQ vs. SWMP
@@ -122,53 +121,12 @@ map_df$Data_N <- formatC(map_df$Data_N, format="d", big.mark = ",")
 
 # Create popup labels to display metadata info
 map_df <- map_df %>%
-  mutate(popup = paste("<br> ProgLocID: <b>", ProgramLocationID,"</b>",
-                       "<br> Data_N: ", Data_N,
-                       "<br> Years: ", years,
-                       "<br> Params: ", params),
-         label = paste(ProgramID, ": ", ProgramName, 
-                       " - ProgLocID: ", ProgramLocationID))
-
-# Create map object to load in shiny app
-leaflet_map <- leaflet(map_df) %>%
-  addProviderTiles(providers$CartoDB.PositronNoLabels, 
-                   group = "Positron by CartoDB")
-
-entities <- unique(map_df$Entity)
-
-for(e in entities){
-  
-  filtered_data <- map_df %>% filter(Entity==e)
-  
-  leaflet_map <- leaflet_map %>%
-    addCircleMarkers(data = filtered_data, 
-                     lat=~Lat, lng=~Lon, fillColor=~pal(Entity),
-                     weight=0.5, radius=~rad, 
-                     fillOpacity=0.4, opacity=0.4, color="black",
-                     popup = ~popup,
-                     label = ~label,
-                     group = e)
-  
-  
-  pal2 <- colorFactor(seacar_palette, unique(filtered_data$ProgramName))
-  program_pal <- pal2(unique(filtered_data$ProgramName))
-  names(program_pal) <- unique(filtered_data$ProgramName)
-  
-  leaflet_map <- leaflet_map %>%
-    addCircleMarkers(data = filtered_data,
-                     lat=~Lat, lng=~Lon, fillColor=~pal2(ProgramName),
-                     weight=0.5, radius=~rad, 
-                     fillOpacity=0.6, opacity=0.6, color="black",
-                     popup = ~popup,
-                     label = ~label, 
-                     group=paste0(e, "_by_entity"))
-  
-}
-
-leaflet_map <- leaflet_map %>%
-  addLayersControl(baseGroups = c("Positron by CartoDB"),
-                   overlayGroups = c(entities, paste0(entities, "_by_entity")),
-                   options = layersControlOptions(collapsed=TRUE))
+  mutate(popup = paste("<br> <b>ProgLocID</b>: ", ProgramLocationID,
+                       "<br> <b>ProgramName</b> (ID): ", ProgramName," (",ProgramID,")",
+                       "<br> <b>Data_N</b>: ", Data_N,
+                       "<br> <b>Years</b>: ", years,
+                       "<br> <b>Params</b>: ", params),
+         label = paste(ProgramLocationID))
 
 # Gantt chart to show Entity timeline
 # Group by Entity to find gaps in coverage by year
@@ -213,55 +171,7 @@ df_gaps_by_entity <- site_years %>%
   unnest(cols = c(gap_years)) %>%
   arrange(ProgramName, ProgramLocationID)
 
-# Function to serve gannt plots
-plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Program"){
-  if(type=="All"){
-    
-    min_year <- min(df_gaps$startYear)
-    max_year <- max(df_gaps$endYear)
-    
-    plot <- ggplot(df_gaps, aes(x=startYear, xend=endYear, y=Entity, yend=Entity)) +
-      geom_segment(linewidth=4, colour=pal(df_gaps$Entity)) +
-      labs(title="Years of data for each Entity",
-           x="Years",
-           y="Entity") + 
-      scale_x_continuous(limits=c(min_year, max_year),
-                         breaks=seq(max_year, min_year, -2)) +
-      plot_theme
-  } else if(type=="Entity"){
-    filtered_df <- df_gaps_by_entity %>% 
-      filter(Entity==ent)
-    
-    pal2 <- colorFactor(seacar_palette, unique(filtered_df$ProgramName))
-    program_pal <- pal2(unique(filtered_df$ProgramName))
-    names(program_pal) <- unique(filtered_df$ProgramName)
-    
-    filtered_df$ProgramName <- factor(filtered_df$ProgramName)
-    
-    min_year <- min(filtered_df$startYear)
-    max_year <- max(filtered_df$endYear)
-    
-    plot <- ggplot(filtered_df,
-                   aes(x=startYear, xend=endYear, 
-                       y=ProgramLocationID, yend=ProgramLocationID)) +
-      geom_segment(linewidth=4, aes(color=filtered_df$ProgramName)) +
-      labs(title=paste0(ent, " - Years of data for each Station"),
-           x="Years",
-           y="ProgramLocationID",
-           color="Program") +
-      scale_y_discrete(limits = unique(filtered_df$ProgramLocationID)) +
-      scale_color_manual(values=program_pal) +
-      scale_x_continuous(limits=c(min_year, max_year),
-                         breaks=seq(max_year, min_year, -2)) +
-      plot_theme
-    
-  }
-  return(plot)
-}
-# Define all_entities plot beforehand to save processing
-all_entities_gantt_plot <- plot_gantt(type="All")
-
-plot_gantt(type="Entity", ent="Aquatic Preserve Continuous Water Quality Program")
+# plot_gantt(type="Entity", ent="Aquatic Preserve Continuous Water Quality Program")
 # plot_gantt(type="Entity", ent="National Estuarine Research Reserve SWMP")
 
 # Entity-level Table display
@@ -269,7 +179,7 @@ table_display <- df %>%
   group_by(Entity, link2) %>%
   summarize(NumStations = length(unique(ProgramLocationID)),
             Data_N = sum(Data_N),
-            includedParams = paste(sort(unique(Parameter), 
+            IncludedParams = paste(sort(unique(Parameter), 
                                         decreasing=FALSE), 
                                    collapse=", ")) %>%
   arrange(desc(Data_N))
@@ -287,7 +197,7 @@ table_display$Data_N <- formatC(table_display$Data_N, format="d", big.mark = ","
 table_display_by_entity <- df %>%
   group_by(Entity, ProgramLocationID, ProgramName, link) %>% 
   summarize(Data_N = sum(Data_N),
-            includedParams = paste(sort(unique(Parameter), 
+            IncludedParams = paste(sort(unique(Parameter), 
                                         decreasing=FALSE), 
                                    collapse=", ")) %>%
   arrange(desc(ProgramName),desc(Data_N))
@@ -298,3 +208,10 @@ table_display_by_entity <- table_display_by_entity %>%
 
 # Formatting to display commas between data counts
 table_display_by_entity$Data_N <- formatC(table_display_by_entity$Data_N, format="d", big.mark = ",")
+
+# SAVE RDS OBJECTS
+files_to_save <- c("df_gaps", "df_gaps_by_entity", "map_df",
+                   "table_display", "table_display_by_entity", "pal")
+for(file in files_to_save){
+  saveRDS(get(file), file=paste0("rds/",file,".rds"))
+}
