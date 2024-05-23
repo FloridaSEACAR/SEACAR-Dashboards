@@ -1,24 +1,7 @@
-source("seacar_data_location.R") # import data location variable
-
+library(sf)
 library(xlsx)
 
-# SEACAR Plot theme
-plot_theme <- theme_bw() +
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.background = element_rect(fill="gray97"),
-        text=element_text(family="Arial"),
-        plot.title=element_text(hjust=0.5, size=12, color="#314963"),
-        plot.subtitle=element_text(hjust=0.5, size=10, color="#314963"),
-        legend.title=element_text(size=14),
-        legend.text = element_text(size=12),
-        legend.text.align = 0,
-        axis.title.x = element_text(size=10, margin = margin(t = 5, r = 0,
-                                                             b = 10, l = 0)),
-        axis.title.y = element_text(size=10, margin = margin(t = 0, r = 10,
-                                                             b = 0, l = 0)),
-        axis.text=element_text(size=11),
-        axis.text.x=element_text(angle = -45, hjust = 0))
+source("seacar_data_location.R") # import data location variable
 
 # Custom SEACAR palette
 seacar_palette <- c(
@@ -41,6 +24,7 @@ seacar_palette <- c(
 
 files <- list.files(seacar_data_location, full.names = TRUE)
 cont_files <- str_subset(files, "_cont_") # Locate continuous files only
+hab_files <- str_subset(files, "All_") # Locate species habitat files
 
 data_directory <- list() # Create directory to store grouped results
 # Loop through files and create summary frames
@@ -73,6 +57,44 @@ for(p in names(data_directory)){
   data <- bind_rows(data, bind_rows(data_directory[[p]]))
 }
 
+### GATHER SPECIES SAMPLING SITES
+species_sites <- data.table()
+# Read in species-based Habitat files to plot their locations
+for(h_file in hab_files){
+  hab_df <- fread(h_file, na.strings = "NULL", sep='|')
+  hab_df <- hab_df %>% group_by(ProgramID, ProgramLocationID) %>%
+    summarize(N_Data = n())
+  hab_df$habitat <- str_split(tail(str_split(h_file,"/")[[1]],1),"_")[[1]][2]
+  
+  species_sites <- bind_rows(species_sites, hab_df)
+}
+
+# Reading in sample locations files (pt and line)
+sample_locs_ln <- st_read(paste0(seacar_shape_location, "/SampleLocations12mar2024/vw_SampleLocation_Line.shp"))
+sample_locs_pt <- st_read(paste0(seacar_shape_location, "/SampleLocations12mar2024/vw_SampleLocation_Point.shp"))
+
+sample_locs_ln <- sample_locs_ln %>% filter(ProgramLoc %in% unique(species_sites$ProgramLocationID))
+sample_locs_pt <- sample_locs_pt %>% filter(ProgramLoc %in% unique(species_sites$ProgramLocationID))
+
+species_sample_locations_ln <- merge(x=sample_locs_ln, y=species_sites,
+                                     by.x = c("ProgramLoc", "ProgramID"),
+                                     by.y = c("ProgramLocationID", "ProgramID"))
+species_sample_locations_pt <- merge(x=sample_locs_pt, y=species_sites,
+                                     by.x = c("ProgramLoc", "ProgramID"),
+                                     by.y = c("ProgramLocationID", "ProgramID"))
+
+species_sample_locations_pt <- species_sample_locations_pt %>%
+  mutate(popup = paste0("<br> <b>", habitat, "</b>", 
+                        "<br> ProgramLocationID: ", ProgramLoc,
+                        "<br> ProgramID: ", ProgramID))
+
+species_sample_locations_pt <- as.data.frame(species_sample_locations_pt) %>%
+  select(habitat, ProgramLoc, ProgramID, Latitude_D, Longitude_)
+
+# Entities to highlight
+highlights <- c("Aquatic Preserve Continuous Water Quality Program", 
+                "National Estuarine Research Reserve SWMP")
+
 # Read in excel file of ProgramIDs to be grouped into "Entities"
 # AP Cont. WQ vs. SWMP
 entities <- read.xlsx("data/SEACAR Program Matrix_ContinuousWQ_ProgramGroups.xlsx",
@@ -92,7 +114,7 @@ df <- merge(data, entities[ , c("Entity", "ProgramID", "link", "link2")],
 df[is.na(Entity), `:=` (Entity = ProgramName)]
 df <- df[!is.na(ProgramLocationID)]
 df[Entity=="USGS Coral Reef Ecosystem Studies (CREST) Project", `:=` 
-   (link2 = paste0("https://data.florida-seacar.org/programs/details/",ProgramID))]
+   (link = paste0("https://data.florida-seacar.org/programs/details/",ProgramID))]
 
 # Group all others as "Other"
 # df <- df[!Entity %in% highlights, `:=` (Entity = "Other")]
@@ -171,17 +193,16 @@ df_gaps_by_entity <- site_years %>%
   unnest(cols = c(gap_years)) %>%
   arrange(ProgramName, ProgramLocationID)
 
-# plot_gantt(type="Entity", ent="Aquatic Preserve Continuous Water Quality Program")
-# plot_gantt(type="Entity", ent="National Estuarine Research Reserve SWMP")
-
 # Entity-level Table display
 table_display <- df %>% 
   group_by(Entity, link2) %>%
-  summarize(NumStations = length(unique(ProgramLocationID)),
-            Data_N = sum(Data_N),
-            IncludedParams = paste(sort(unique(Parameter), 
-                                        decreasing=FALSE), 
-                                   collapse=", ")) %>%
+  summarize(
+    Status = ifelse(max(Year) >= 2023, "Active", "Historic"),
+    NumStations = length(unique(ProgramLocationID)),
+    Data_N = sum(Data_N),
+    IncludedParams = paste(sort(unique(Parameter),
+                                decreasing=FALSE), 
+                           collapse=", ")) %>%
   arrange(desc(Data_N))
 
 # Formatting to include links
@@ -192,26 +213,47 @@ table_display <- table_display %>%
 # Formatting to display commas between data counts
 table_display$Data_N <- formatC(table_display$Data_N, format="d", big.mark = ",")
 
-
 # Tables display for each entity
 table_display_by_entity <- df %>%
-  group_by(Entity, ProgramLocationID, ProgramName, link) %>% 
+  group_by(Entity, ProgramLocationID, ProgramName, link,
+           Parameter) %>%
   summarize(Data_N = sum(Data_N),
-            IncludedParams = paste(sort(unique(Parameter), 
-                                        decreasing=FALSE), 
-                                   collapse=", ")) %>%
+            Status = ifelse(max(Year) >= 2023, "Active", "Historic")) %>%
   arrange(desc(ProgramName),desc(Data_N))
+
+# Load in SKT stats files to grab "SufficientData" column
+skt_combined <- readRDS("data/skt_combined.rds")
+
+table_display_by_entity <- merge(x=table_display_by_entity,
+                                 y=skt_combined[,c("ProgramLocationID",
+                                                   "ParameterName",
+                                                   "SufficientData")],
+                                 by.x=c("ProgramLocationID", "Parameter"),
+                                 by.y=c("ProgramLocationID", "ParameterName"))
 
 # Formatting to include links
 table_display_by_entity <- table_display_by_entity %>%
   mutate(ProgramNameLink = paste0("<a href='",link,"' target='_blank'>",ProgramName,"</a>"))
+
+# Adding Button column to serve links into shiny
+# Parameter and ProgramLocationID to be used as inputs in plotting function
+table_display_by_entity <- table_display_by_entity %>%
+  rowwise() %>%
+  mutate(
+    Button = ifelse(SufficientData==TRUE, as.character(
+      actionLink(
+        paste0("button_", Parameter, "_", ProgramLocationID),
+        label = Parameter,
+        onclick = 'Shiny.onInputChange(\"select_button\",  this.id);'
+    )),Parameter))
 
 # Formatting to display commas between data counts
 table_display_by_entity$Data_N <- formatC(table_display_by_entity$Data_N, format="d", big.mark = ",")
 
 # SAVE RDS OBJECTS
 files_to_save <- c("df_gaps", "df_gaps_by_entity", "map_df",
-                   "table_display", "table_display_by_entity", "pal")
+                   "table_display", "table_display_by_entity", "pal",
+                   "species_sample_locations_pt")
 for(file in files_to_save){
   saveRDS(get(file), file=paste0("rds/",file,".rds"))
 }

@@ -9,9 +9,28 @@ library(tidyr)
 library(ggplot2)
 library(DT)
 library(forcats)
+library(lubridate)
 
 # process_data.R creates .RDS objects which are loaded within Shiny
 # source("process_data.R")
+
+# SEACAR Plot theme
+plot_theme <- theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="#FFFFFF"),
+        text=element_text(family="Arial"),
+        plot.title=element_text(hjust=0.5, size=12, color="#314963"),
+        plot.subtitle=element_text(hjust=0.5, size=10, color="#314963"),
+        legend.title=element_text(size=14),
+        legend.text = element_text(size=12),
+        legend.text.align = 0,
+        axis.title.x = element_text(size=12, margin = margin(t = 5, r = 0,
+                                                             b = 10, l = 0)),
+        axis.title.y = element_text(size=12, margin = margin(t = 0, r = 10,
+                                                             b = 0, l = 0)),
+        axis.text=element_text(size=11),
+        axis.text.x=element_text(angle = -45, hjust = 0))
 
 # Custom SEACAR palette
 seacar_palette <- c(
@@ -32,9 +51,13 @@ seacar_palette <- c(
   "#6B59AB"
 )
 
+seacar_sp_palette <- c("#005396","#0088B1","#00ADAE","#65CCB3","#AEE4C1",
+                       "#FDEBA8","#F8CD6D","#F5A800","#F17B00")
+
 # use the following lines to load objects created in process_data.R
 files_to_load <- c("df_gaps", "df_gaps_by_entity", "map_df",
-                   "table_display", "table_display_by_entity", "pal")
+                   "table_display", "table_display_by_entity", "pal",
+                   "species_sample_locations_pt")
 
 for(file in files_to_load){
   eval(call("<-", as.name(file), readRDS(paste0("rds/",file,".rds"))))
@@ -61,15 +84,26 @@ entities <- c("All",highlights,
 display_table <- function(entity){
   if(entity=="All"){
     table_display %>% ungroup() %>%
-      select(-c(Entity, link2)) %>%
-      rename(Entity = EntityLink) %>%
-      select(Entity, NumStations, Data_N, IncludedParams)
+      select(-c(link2)) %>%
+      select(Entity, NumStations, Data_N, Status, IncludedParams)
   } else {
-    table_display_by_entity %>% filter(Entity==entity) %>% 
-      ungroup() %>% select(-c(Entity, ProgramName, link)) %>%
+    table_display_by_entity %>% filter(Entity==entity) %>%
+      ungroup() %>% select(-Entity) %>%
+      group_by(ProgramLocationID, ProgramNameLink, Status) %>%
+      summarise(IncludedParams = paste(sort(unique(Button),
+                                            decreasing=FALSE),
+                                       collapse=", "),
+                .groups = "keep") %>%
       rename(ProgramName = ProgramNameLink) %>%
-      select(ProgramName, ProgramLocationID, Data_N, IncludedParams)
+      select(ProgramName, ProgramLocationID, Status, IncludedParams)
   }
+}
+
+display_long_table <- function(entity){
+  table_display_by_entity %>% filter(Entity==entity) %>% 
+    ungroup() %>% select(-c(Entity, ProgramName, link)) %>%
+    rename(ProgramName = ProgramNameLink) %>%
+    select(ProgramName, ProgramLocationID, Data_N, Status, Parameter, SufficientData)
 }
 
 df_gaps$Entity <- fct_rev(factor(df_gaps$Entity))
@@ -88,7 +122,8 @@ plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Prog
            y="Entity") + 
       scale_x_continuous(limits=c(min_year, max_year),
                          breaks=seq(max_year, min_year, -2)) +
-      plot_theme
+      plot_theme + theme(panel.background = element_rect(fill="gray97"))
+    
   } else if(type=="Entity"){
     filtered_df <- df_gaps_by_entity %>% 
       filter(Entity==ent)
@@ -120,7 +155,7 @@ plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Prog
       scale_color_manual(values=program_pal) +
       scale_x_continuous(limits=c(min_year, max_year),
                          breaks=seq(max_year, min_year, -2)) +
-      plot_theme
+      plot_theme + theme(panel.background = element_rect(fill="gray97"))
     
   }
   return(plot)
@@ -173,38 +208,153 @@ for(e in ents){
   }
 }
 
+habs <- c("SAV", "NEKTON", "CORAL", "Oyster", "CW")
+
+hab_pal <- colorFactor(seacar_sp_palette, habs)
+
+for(hab in habs){
+  data <- species_sample_locations_pt %>% filter(habitat==hab)
+  leaflet_map <- leaflet_map %>% addCircleMarkers(
+    data=data,
+    lng = data$Longitude_, lat = data$Latitude_D,
+    fillColor = hab_pal(hab), rad = 2.5,
+    weight=0.6, fillOpacity=0.6, group=hab, color="black",
+    opacity = 0.4, popup = data$popup, label = hab)
+}
+
 leaflet_map <- leaflet_map %>%
   addLayersControl(baseGroups = c("Positron by CartoDB"),
-                   overlayGroups = c(entities, paste0(entities, "_by_entity")),
+                   overlayGroups = c(entities, paste0(entities, "_by_entity"),
+                                     habs),
                    options = layersControlOptions(collapsed=TRUE))
 
-# Define all_entities plot beforehand to save processing
-# all_entities_gantt_plot <- plot_gantt(type="All")
+# Load in necessary files for continuous SKT plots
+YM_combined <- readRDS("data/YM_combined.rds")
+skt_combined <- readRDS("data/skt_combined.rds")
+
+# Creating units datatable for display in plots
+cont_param_df <- data.table(
+  ParameterName = c("Dissolved Oxygen","Dissolved Oxygen Saturation","pH",
+                    "Salinity","Turbidity","Water Temperature"),
+  unit = c("mg/L","%","pH","ppt","NTU","Degrees C"))
+
+# Function to plot continuous plots
+plot_cont <- function(plid, param){
+  
+  # Defining labels for y-axis
+  unit <- cont_param_df[ParameterName==param, unit]
+  y_labels <- ifelse(param=="pH", unit, paste0(param, " (", unit, ")"))
+  
+  skt_stats <- skt_combined %>% 
+    filter(ProgramLocationID==plid,
+           ParameterName==param)
+  # Exception for when multiple results are return (AP & NERR), select 1st val
+  if(nrow(skt_stats>2)){
+    skt_stats <- skt_stats[1]
+  }
+  
+  # Checking for sufficient data
+  if(skt_stats$SufficientData==FALSE){
+    next
+    print("Insufficient data to plot")
+  } else {
+    
+    # Gets x and y values for starting point for trendline
+    KT.Plot <- skt_stats %>%
+      mutate(x=decimal_date(EarliestSampleDate),
+             y=(x-EarliestYear)*SennSlope+SennIntercept)
+    # Gets x and y values for ending point for trendline
+    KT.Plot2 <- skt_stats %>%
+      mutate(x=decimal_date(LastSampleDate),
+             y=(x-EarliestYear)*SennSlope+SennIntercept)
+    # Combines the starting and endpoints for plotting the trendline
+    KT.Plot <- bind_rows(KT.Plot, KT.Plot2)
+    rm(KT.Plot2)
+    KT.Plot <- as.data.table(KT.Plot[order(KT.Plot$MonitoringID), ])
+    KT.Plot <- KT.Plot[!is.na(KT.Plot$y),]
+    
+    plot_data <- YM_combined %>% filter(ProgramLocationID==plid,
+                                        ParameterName==param)
+    
+    t_min <- min(plot_data$Year)
+    t_max <- max(plot_data$YearMonthDec)
+    t_max_brk <- as.integer(round(t_max, 0))
+    t <- t_max - t_min
+    min_RV <- min(plot_data$Mean)
+    if(t>=30){
+      # Set breaks to every 10 years if more than 30 years of data
+      brk <- -10
+    }else if(t<30 & t>=10){
+      # Set breaks to every 4 years if between 30 and 10 years of data
+      brk <- -4
+    }else if(t<10 & t>=4){
+      # Set breaks to every 2 years if between 10 and 4 years of data
+      brk <- -2
+    }else if(t<4 & t>=2){
+      # Set breaks to every year if between 4 and 2 years of data
+      brk <- -1
+    }else if(t<2){
+      # Set breaks to every year if less than 2 years of data
+      brk <- -1
+      # Sets t_max to be 1 year greater and t_min to be 1 year lower
+      # Forces graph to have at least 3 tick marks
+      t_max <- t_max+1
+      t_min <- t_min-1
+    }
+    
+    p1 <- ggplot(data=plot_data,
+                 aes(x=YearMonthDec, y=Mean)) +
+      geom_point(shape=21, size=3, color="#333333", fill="#cccccc",
+                 alpha=0.75) +
+      geom_line(data=KT.Plot, aes(x=x, y=y),
+                color="#000099", linewidth=1.2, alpha=0.7) +
+      labs(title=plid,
+           subtitle=param,
+           x="Year", y=y_labels) +
+      scale_x_continuous(limits=c(t_min-0.25, t_max+0.25),
+                         breaks=seq(t_max_brk, t_min, brk)) +
+      plot_theme
+    
+    return(p1)
+    
+  }
+}
+
+#### BEGIN SHINY UI AND SERVER SETTINGS ####
 
 ui <- fluidPage(
   tags$head(tags$style('body {font-family: Arial;}')),
   titlePanel("SEACAR Continuous WQ Dashboard"),
   fluidRow(
-    column(4),
+    column(4,
+           leafletOutput("map")),
+    column(8,
+           plotOutput("gantt_plot")),
+  ),
+  fluidRow(
+    checkboxGroupInput("habitat", 
+                       label = "Toggle species habitat sampling",
+                       choiceValues = habs,
+                       choiceNames = c("Submerged Aquatic Vegetation","Nekton",
+                                       "Coral/Coral Reef","Oyster/Oyster Reef",
+                                       "Coastal Wetlands"),
+                       selected = NULL, inline = TRUE)
+  ),
+  fluidRow(
     column(4,
            wellPanel(
              selectInput(inputId = "entitySelect",
                          label = "Select Entity to view",
                          choices = entities,
                          selected = "All"))
-           ),
-    column(4)
+    ),
+    column(8)
   ),
-  fluidRow(
-    column(4,
-           leafletOutput("map")),
-    column(8,
-           # actionButton("show_plot", "Show plot"),
-           plotOutput("gantt_plot")),
-  ),
+  
   fluidRow(
     column(12,
-           DT::DTOutput("entity_overview_table"))
+           DT::DTOutput("entity_overview_table"),
+           verbatimTextOutput("model")),
   )
 )
 
@@ -216,19 +366,56 @@ server <- function(input, output, session){
   
   type <- reactive({if(e()=="All"){"All"}else{"Entity"}})
   
+  stations <- reactive({
+    if(e()!="All"){
+      unique(display_long_table(e())$ProgramLocationID)
+    }
+  })
+  
+  params <- reactive({
+    if(e()!="All"){
+      display_long_table(e()) %>% 
+        filter(ProgramLocationID==input$stationSelect,
+               SufficientData==TRUE) %>% 
+        pull(Parameter)
+    }
+  })
+  
   output$map <- renderLeaflet({
-    leaflet_map
+    leaflet_map %>%
+      hideGroup(habs)
   })
   
   output$gantt_plot <- renderPlot(plot_gantt(type=type(), ent=e()))
   
   output$entity_overview_table <- DT::renderDT({
-    datatable(display_table(e()),
-              escape=FALSE,
-              options = list(
+    
+    data <- setDT(display_table(e()))
+    
+    DT::datatable(
+      data,
+      escape = FALSE,
+      selection = "none",
+      rownames = FALSE,
+      style = "bootstrap",
+      options = list(
                 paging=TRUE,
-                pageLength=nrow(display_table(e()))
+                pageLength=nrow(data)
               ))
+  })
+  
+  observeEvent(input$select_button, {
+    param <- strsplit(input$select_button, "_")[[1]][[2]]
+    plid <- strsplit(input$select_button, "_")[[1]][[3]]
+    
+    showModal(modalDialog(
+      title = paste0(
+        "Seasonal Kendall-Tau trend analysis for ", param, " - ", plid),
+      renderPlot(plot_cont(plid = plid,
+                           param = param)),
+      easyClose = TRUE,
+      size="l"))
+    
   })
   
   observe({
@@ -244,12 +431,20 @@ server <- function(input, output, session){
     }
   })
   
-  observeEvent(input$show_plot, {
-    showModal(modalDialog(title = "Enlarged plot",
-                          renderPlot(plot_gantt(type=type(), ent=e())),
-                          easyClose = TRUE,
-                          size="l"))
+  observe({
+    leafletProxy("map") %>%
+      showGroup(input$habitat) %>%
+      hideGroup(habs[!habs %in% input$habitat])
   })
+  
 }
 
 shinyApp(ui = ui, server = server)
+
+# deployApp(appFiles = c("app.R","data/skt_combined.rds", "data/YM_combined.rds",
+#                        "rds/df_gaps.rds", "rds/df_gaps_by_entity.rds",
+#                        "rds/map_df.rds", "rds/pal.rds",
+#                        "rds/species_sample_locations_pt.rds",
+#                        "rds/table_display.rds",
+#                        "rds/table_display_by_entity.rds",
+#                        "README.md"))
