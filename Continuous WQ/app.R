@@ -10,6 +10,7 @@ library(ggplot2)
 library(DT)
 library(forcats)
 library(lubridate)
+library(shinyjs)
 
 # process_data.R creates .RDS objects which are loaded within Shiny
 # source("process_data.R")
@@ -89,13 +90,14 @@ display_table <- function(entity){
   } else {
     table_display_by_entity %>% filter(Entity==entity) %>%
       ungroup() %>% select(-Entity) %>%
-      group_by(ProgramLocationID, ProgramNameLink, Status) %>%
+      group_by(ProgramLocationID, ProgramNameLink, Status, N_Years) %>%
       summarise(IncludedParams = paste(sort(unique(Button),
                                             decreasing=FALSE),
                                        collapse=", "),
                 .groups = "keep") %>%
-      rename(ProgramName = ProgramNameLink) %>%
-      select(ProgramName, ProgramLocationID, Status, IncludedParams)
+      rename(ProgramName = ProgramNameLink,
+             Years_N = N_Years) %>%
+      select(ProgramName, ProgramLocationID, Status, Years_N, IncludedParams)
   }
 }
 
@@ -222,11 +224,11 @@ for(hab in habs){
     opacity = 0.4, popup = data$popup, label = hab)
 }
 
-leaflet_map <- leaflet_map %>%
-  addLayersControl(baseGroups = c("Positron by CartoDB"),
-                   overlayGroups = c(entities, paste0(entities, "_by_entity"),
-                                     habs),
-                   options = layersControlOptions(collapsed=TRUE))
+# leaflet_map <- leaflet_map %>%
+#   addLayersControl(baseGroups = c("Positron by CartoDB"),
+#                    overlayGroups = c(entities, paste0(entities, "_by_entity"),
+#                                      habs),
+#                    options = layersControlOptions(collapsed=TRUE))
 
 # Load in necessary files for continuous SKT plots
 YM_combined <- readRDS("data/YM_combined.rds")
@@ -320,9 +322,26 @@ plot_cont <- function(plid, param){
   }
 }
 
+explanatory_text <- paste(
+  "<b>Seasonal Kendall-Tau</b> analysis has been used to create 
+  trends for each Water Quality parameter where applicable.",
+  
+  "<i>Click on the parameters below</i> for each station to 
+  view their respective plots.",
+
+  "Indicators must have a minumum of 5 years of data within the geographic range 
+  of the analysis to be included in the analysis. In addition, there must be 
+  data from at least two months in common across at least two consecutive years 
+  within the RCP Managed Area being analyzed. Values that pass both tests 
+  will have plots generated.",
+  
+  sep="<br><br>"
+)
+
 #### BEGIN SHINY UI AND SERVER SETTINGS ####
 
 ui <- fluidPage(
+  useShinyjs(),
   tags$head(tags$style('body {font-family: Arial;}')),
   titlePanel("SEACAR Continuous WQ Dashboard"),
   fluidRow(
@@ -332,13 +351,15 @@ ui <- fluidPage(
            plotOutput("gantt_plot")),
   ),
   fluidRow(
-    checkboxGroupInput("habitat", 
-                       label = "Toggle species habitat sampling",
-                       choiceValues = habs,
-                       choiceNames = c("Submerged Aquatic Vegetation","Nekton",
-                                       "Coral/Coral Reef","Oyster/Oyster Reef",
-                                       "Coastal Wetlands"),
-                       selected = NULL, inline = TRUE)
+    column(5,
+      checkboxGroupInput("habitat", 
+                         label = "Toggle species habitat sampling",
+                         choiceValues = habs,
+                         choiceNames = c("Submerged Aquatic Vegetation","Nekton",
+                                         "Coral/Coral Reef","Oyster/Oyster Reef",
+                                         "Coastal Wetlands"),
+                         selected = NULL, inline = TRUE)
+      )
   ),
   fluidRow(
     column(4,
@@ -348,13 +369,17 @@ ui <- fluidPage(
                          choices = entities,
                          selected = "All"))
     ),
-    column(8)
+    column(8,
+           shinyjs::hidden(
+             wellPanel(id="hide_text",
+               htmlOutput("skt_text")
+             ))
+           )
   ),
   
   fluidRow(
     column(12,
-           DT::DTOutput("entity_overview_table"),
-           verbatimTextOutput("model")),
+           DT::DTOutput("entity_overview_table")),
   )
 )
 
@@ -408,6 +433,11 @@ server <- function(input, output, session){
     param <- strsplit(input$select_button, "_")[[1]][[2]]
     plid <- strsplit(input$select_button, "_")[[1]][[3]]
     
+    # Exception for station names that contain "_" within their names (1 prog)
+    if(plid=="FKNMS"){
+      plid <- paste0("FKNMS",strsplit(input$select_button, "FKNMS")[[1]][2])
+    }
+    
     showModal(modalDialog(
       title = paste0(
         "Seasonal Kendall-Tau trend analysis for ", param, " - ", plid),
@@ -418,16 +448,22 @@ server <- function(input, output, session){
     
   })
   
+  output$skt_text <- renderUI({
+    HTML(explanatory_text)
+  })
+  
   observe({
     if(e()=="All"){
       leafletProxy("map") %>%
         showGroup(unique(df_gaps$Entity)) %>%
         hideGroup(entities_plus)
+      shinyjs::hideElement(id="hide_text")
     } else {
       leafletProxy("map") %>%
         showGroup(paste0(e(), "_by_entity")) %>% 
         hideGroup(entities_plus[!entities_plus %in% paste0(e(), "_by_entity")]) %>%
         hideGroup(entities)
+      shinyjs::showElement(id="hide_text")
     }
   })
   

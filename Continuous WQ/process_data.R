@@ -3,6 +3,9 @@ library(xlsx)
 
 source("seacar_data_location.R") # import data location variable
 
+# Determine Active sites dynamically based on current date minus 1 Year
+active_date <- ymd(Sys.Date()) - years(1)
+
 # Custom SEACAR palette
 seacar_palette <- c(
   "#964059",
@@ -69,25 +72,21 @@ for(h_file in hab_files){
   species_sites <- bind_rows(species_sites, hab_df)
 }
 
-# Reading in sample locations files (pt and line)
-sample_locs_ln <- st_read(paste0(seacar_shape_location, "/SampleLocations12mar2024/vw_SampleLocation_Line.shp"))
+# Reading in sample locations files (pt)
 sample_locs_pt <- st_read(paste0(seacar_shape_location, "/SampleLocations12mar2024/vw_SampleLocation_Point.shp"))
 
-sample_locs_ln <- sample_locs_ln %>% filter(ProgramLoc %in% unique(species_sites$ProgramLocationID))
 sample_locs_pt <- sample_locs_pt %>% filter(ProgramLoc %in% unique(species_sites$ProgramLocationID))
 
-species_sample_locations_ln <- merge(x=sample_locs_ln, y=species_sites,
-                                     by.x = c("ProgramLoc", "ProgramID"),
-                                     by.y = c("ProgramLocationID", "ProgramID"))
 species_sample_locations_pt <- merge(x=sample_locs_pt, y=species_sites,
                                      by.x = c("ProgramLoc", "ProgramID"),
                                      by.y = c("ProgramLocationID", "ProgramID"))
 
+# Create popups for display on Leaflet map
 species_sample_locations_pt <- species_sample_locations_pt %>%
   mutate(popup = paste0("<br> <b>", habitat, "</b>", 
                         "<br> ProgramLocationID: ", ProgramLoc,
                         "<br> ProgramID: ", ProgramID))
-
+# Select only necessary columns to save on space
 species_sample_locations_pt <- as.data.frame(species_sample_locations_pt) %>%
   select(habitat, ProgramLoc, ProgramID, Latitude_D, Longitude_)
 
@@ -197,7 +196,7 @@ df_gaps_by_entity <- site_years %>%
 table_display <- df %>% 
   group_by(Entity, link2) %>%
   summarize(
-    Status = ifelse(max(Year) >= 2023, "Active", "Historic"),
+    Status = ifelse(max(Year) >= year(active_date), "Active", "Historical"),
     NumStations = length(unique(ProgramLocationID)),
     Data_N = sum(Data_N),
     IncludedParams = paste(sort(unique(Parameter),
@@ -218,7 +217,7 @@ table_display_by_entity <- df %>%
   group_by(Entity, ProgramLocationID, ProgramName, link,
            Parameter) %>%
   summarize(Data_N = sum(Data_N),
-            Status = ifelse(max(Year) >= 2023, "Active", "Historic")) %>%
+            Status = ifelse(max(Year) >= year(active_date), "Active", "Historical")) %>%
   arrange(desc(ProgramName),desc(Data_N))
 
 # Load in SKT stats files to grab "SufficientData" column
@@ -227,7 +226,8 @@ skt_combined <- readRDS("data/skt_combined.rds")
 table_display_by_entity <- merge(x=table_display_by_entity,
                                  y=skt_combined[,c("ProgramLocationID",
                                                    "ParameterName",
-                                                   "SufficientData")],
+                                                   "SufficientData",
+                                                   "N_Years")],
                                  by.x=c("ProgramLocationID", "Parameter"),
                                  by.y=c("ProgramLocationID", "ParameterName"))
 
@@ -257,3 +257,4 @@ files_to_save <- c("df_gaps", "df_gaps_by_entity", "map_df",
 for(file in files_to_save){
   saveRDS(get(file), file=paste0("rds/",file,".rds"))
 }
+
