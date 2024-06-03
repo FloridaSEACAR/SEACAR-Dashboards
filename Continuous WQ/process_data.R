@@ -243,9 +243,9 @@ table_display_by_entity <- table_display_by_entity %>%
     Button = ifelse(SufficientData==TRUE, as.character(
       actionLink(
         paste0("button_", Parameter, "_", ProgramLocationID),
-        label = Parameter,
+        label = paste0(Parameter, " (",N_Years,")"),
         onclick = 'Shiny.onInputChange(\"select_button\",  this.id);'
-    )),Parameter))
+    )),paste0(Parameter, " (",N_Years,")")))
 
 # Formatting to display commas between data counts
 table_display_by_entity$Data_N <- formatC(table_display_by_entity$Data_N, format="d", big.mark = ",")

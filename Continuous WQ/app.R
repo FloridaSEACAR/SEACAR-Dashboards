@@ -12,6 +12,9 @@ library(forcats)
 library(lubridate)
 library(shinyjs)
 
+# Uncomment rsconnect when deploying app
+# library(rsconnect)
+
 # process_data.R creates .RDS objects which are loaded within Shiny
 # source("process_data.R")
 
@@ -90,14 +93,15 @@ display_table <- function(entity){
   } else {
     table_display_by_entity %>% filter(Entity==entity) %>%
       ungroup() %>% select(-Entity) %>%
-      group_by(ProgramLocationID, ProgramNameLink, Status, N_Years) %>%
-      summarise(IncludedParams = paste(sort(unique(Button),
-                                            decreasing=FALSE),
-                                       collapse=", "),
-                .groups = "keep") %>%
-      rename(ProgramName = ProgramNameLink,
-             Years_N = N_Years) %>%
-      select(ProgramName, ProgramLocationID, Status, Years_N, IncludedParams)
+      group_by(ProgramLocationID, ProgramNameLink, Status) %>%
+      summarise(
+        "IncludedParams (Number of Years)" = paste(sort(unique(Button),
+                                                        decreasing=FALSE), 
+                                                   collapse=", "),
+        .groups = "keep") %>%
+      rename(ProgramName = ProgramNameLink) %>%
+      select(ProgramName, ProgramLocationID, Status, 
+             "IncludedParams (Number of Years)")
   }
 }
 
@@ -333,7 +337,7 @@ explanatory_text <- paste(
   of the analysis to be included in the analysis. In addition, there must be 
   data from at least two months in common across at least two consecutive years 
   within the RCP Managed Area being analyzed. Values that pass both tests 
-  will have plots generated.",
+  will have plots generated and will be hyperlinked below.",
   
   sep="<br><br>"
 )
