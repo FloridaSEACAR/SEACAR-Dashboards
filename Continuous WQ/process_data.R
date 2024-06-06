@@ -136,6 +136,9 @@ pal <- colorFactor(seacar_palette, map_df$Entity)
 
 # Determine radius levels
 map_df <- map_df %>% mutate(rad = sqrt(Data_N)/100)
+# map_df <- map_df %>% mutate(rad = sqrt(Data_N)*20)
+# map_df <- map_df %>% mutate(rad = log10(Data_N)*2)
+# map_df <- map_df %>% mutate(rad = sqrt(log10(Data_N))*2)
 
 # Add commas to large numbers for easier viewing
 map_df$Data_N <- formatC(map_df$Data_N, format="d", big.mark = ",")
@@ -191,6 +194,8 @@ df_gaps_by_entity <- site_years %>%
   summarize(gap_years = list(find_gaps(Years))) %>%
   unnest(cols = c(gap_years)) %>%
   arrange(ProgramName, ProgramLocationID)
+setDT(df_gaps_by_entity)
+df_gaps_by_entity[startYear==endYear, `:=` (endYear = endYear+0.001)]
 
 # Entity-level Table display
 table_display <- df %>% 

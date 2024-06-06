@@ -15,8 +15,11 @@ library(shinyjs)
 # Uncomment rsconnect when deploying app
 # library(rsconnect)
 
-# process_data.R creates .RDS objects which are loaded within Shiny
+# process_data.R creates .RDS objects which are loaded within app.R when deployed
 # source("process_data.R")
+
+# add publish date beneath funding acknowledgement to show date of latest update
+publish_date <- Sys.Date()
 
 # SEACAR Plot theme
 plot_theme <- theme_bw() +
@@ -89,19 +92,23 @@ display_table <- function(entity){
   if(entity=="All"){
     table_display %>% ungroup() %>%
       select(-c(link2)) %>%
-      select(Entity, NumStations, Data_N, Status, IncludedParams)
+      select(Entity, NumStations, Data_N, Status, IncludedParams) %>%
+      rename(Parameters = IncludedParams,
+             "Number of Stations" = NumStations,
+             "Number of Observations" = Data_N)
   } else {
     table_display_by_entity %>% filter(Entity==entity) %>%
       ungroup() %>% select(-Entity) %>%
       group_by(ProgramLocationID, ProgramNameLink, Status) %>%
       summarise(
-        "IncludedParams (Number of Years)" = paste(sort(unique(Button),
-                                                        decreasing=FALSE), 
-                                                   collapse=", "),
+        "Parameters (Number of Years)" = paste(sort(unique(Button),
+                                                    decreasing=FALSE), 
+                                               collapse=", "),
         .groups = "keep") %>%
-      rename(ProgramName = ProgramNameLink) %>%
-      select(ProgramName, ProgramLocationID, Status, 
-             "IncludedParams (Number of Years)")
+      rename("Program Name" = ProgramNameLink,
+             "Station ID" = ProgramLocationID) %>%
+      select("Program Name", "Station ID", Status, 
+             "Parameters (Number of Years)")
   }
 }
 
@@ -112,6 +119,7 @@ display_long_table <- function(entity){
     select(ProgramName, ProgramLocationID, Data_N, Status, Parameter, SufficientData)
 }
 
+# Ensure proper order of Entity display
 df_gaps$Entity <- fct_rev(factor(df_gaps$Entity))
 
 # Function to serve gannt plots
@@ -134,8 +142,20 @@ plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Prog
     filtered_df <- df_gaps_by_entity %>% 
       filter(Entity==ent)
     
+    # Shorten APCWQ and NERR SWMP for display in Gantt plot
+    if(ent=="Aquatic Preserve Continuous Water Quality Program"){
+      filtered_df <- filtered_df %>%
+        mutate(ProgramName = str_replace_all(ProgramName, c(
+          "Aquatic Preserves Continuous Water Quality Monitoring" = "APCWQ",
+          "Aquatic Preserve Continuous Water Quality Monitoring" = "APCWQ")))
+    } else if(ent=="National Estuarine Research Reserve SWMP"){
+      filtered_df <- filtered_df %>%
+        mutate(ProgramName = str_replace_all(ProgramName, c(
+          "National Estuarine Research Reserve System-Wide Monitoring Program" = "NERR SWMP")))
+    }
+    # Set secondary color palette (by Program instead of Entity)
     pal2 <- colorFactor(seacar_palette, unique(filtered_df$ProgramName))
-    
+    # Allows color palette to display for unique programs in APCWQ and NERR SWMP
     if(ent %in% highlights){
       program_pal <- pal2(unique(filtered_df$ProgramName))
     } else {
@@ -181,13 +201,12 @@ for(e in ents){
   
   leaflet_map <- leaflet_map %>%
     addCircleMarkers(data = filtered_data, 
-                     lat=~Lat, lng=~Lon, fillColor=~pal(Entity),
-                     weight=0.5, radius=~rad, 
-                     fillOpacity=0.4, opacity=0.4, color="black",
-                     popup = ~popup,
-                     label = ~label,
-                     group = e)
-  
+               lat=~Lat, lng=~Lon, fillColor=~pal(Entity),
+               weight=0.5, radius=~rad, 
+               fillOpacity=0.4, opacity=0.4, color="black",
+               popup = ~popup,
+               label = ~label,
+               group = e)
   
   pal2 <- colorFactor(seacar_palette, unique(filtered_data$ProgramName))
   program_pal <- pal2(unique(filtered_data$ProgramName))
@@ -196,26 +215,26 @@ for(e in ents){
   if(e %in% highlights){
     leaflet_map <- leaflet_map %>%
       addCircleMarkers(data = filtered_data[Entity %in% highlights, ],
-                       lat=~Lat, lng=~Lon, fillColor=~pal2(ProgramName),
-                       weight=0.5, radius=~rad, 
-                       fillOpacity=0.6, opacity=0.6, color="black",
-                       popup = ~popup,
-                       label = ~label, 
-                       group=paste0(e, "_by_entity"))
+                 lat=~Lat, lng=~Lon, fillColor=~pal2(ProgramName),
+                 weight=0.5, radius=~rad, 
+                 fillOpacity=0.6, opacity=0.6, color="black",
+                 popup = ~popup,
+                 label = ~label, 
+                 group=paste0(e, "_by_entity"))
   } else if(!e %in% highlights){
     leaflet_map <- leaflet_map %>%
       addCircleMarkers(data = filtered_data[!Entity %in% highlights, ],
-                       lat=~Lat, lng=~Lon, fillColor=~pal(Entity),
-                       weight=0.5, radius=~rad, 
-                       fillOpacity=0.6, opacity=0.6, color="black",
-                       popup = ~popup,
-                       label = ~label, 
-                       group=paste0(e, "_by_entity"))
+                 lat=~Lat, lng=~Lon, fillColor=~pal(Entity),
+                 weight=0.5, radius=~rad, 
+                 fillOpacity=0.6, opacity=0.6, color="black",
+                 popup = ~popup,
+                 label = ~label, 
+                 group=paste0(e, "_by_entity"))
   }
 }
 
 habs <- c("SAV", "NEKTON", "CORAL", "Oyster", "CW")
-
+# Set habitat palette using unique SP palette
 hab_pal <- colorFactor(seacar_sp_palette, habs)
 
 for(hab in habs){
@@ -227,6 +246,9 @@ for(hab in habs){
     weight=0.6, fillOpacity=0.6, group=hab, color="black",
     opacity = 0.4, popup = data$popup, label = hab)
 }
+
+# Adds the control option in map to control layers
+# Comment out to remove, layers are manipulated in-line within the Shiny app
 
 # leaflet_map <- leaflet_map %>%
 #   addLayersControl(baseGroups = c("Positron by CartoDB"),
@@ -327,26 +349,56 @@ plot_cont <- function(plid, param){
 }
 
 explanatory_text <- paste(
-  "<b>Seasonal Kendall-Tau</b> analysis has been used to create 
-  trends for each Water Quality parameter where applicable.",
+  "<b>Seasonal Kendall-Tau</b> analysis has been used to test for significant 
+  trends in each Water Quality parameter where applicable.",
   
-  "<i>Click on the parameters below</i> for each station to 
-  view their respective plots.",
-
-  "Indicators must have a minumum of 5 years of data within the geographic range 
-  of the analysis to be included in the analysis. In addition, there must be 
-  data from at least two months in common across at least two consecutive years 
-  within the RCP Managed Area being analyzed. Values that pass both tests 
-  will have plots generated and will be hyperlinked below.",
+  "To view a graphical plot of a parameter over time, choose a <b>Station ID</b> and 
+  then click on a <b>Parameter</b> of interest.",
+  
+  "Indicators must have at least 5 years of data to be included in the analysis.",
   
   sep="<br><br>"
 )
+
+# "<img src='data/dep-logos.png' alt='Funding logos'>"
+
+addResourcePath(prefix="www", directoryPath = "www")
+
+funding_text <- paste(
+  "<b>Funding Acknowledgement</b>",
+  
+  "SEACAR is funded, in part, through a grant agreement from the 
+  Florida Department of Environmental Protection, Florida Coastal Management 
+  Program, by a grant provided by the Office for Coastal Management 
+  under the <a href='https://coast.noaa.gov/czm/act/' target='_blank'>
+  Coastal Zone Management Act of 1972</a>, as amended, 
+  National Oceanic and Atmospheric Administration. 
+  The views, statements, findings, conclusions, and recommendations expressed 
+  herein are those of the author(s) and do not necessarily reflect the views 
+  of the State of Florida, NOAA or any of their subagencies.",
+  
+  tags$div(
+    tags$img(
+      src = "www/dep-logos.png",
+      alt = "Funding logos",
+      height = "100",
+      width = "290"
+    ),style="text-align:center;"
+  ),
+  
+  tags$div(paste0("Published: ", publish_date), style="text-align:center;"),
+  
+  sep="<br><br>"
+)
+
+dep_colors <- c("#2E5270","#6D869B","#C8EAFB")
 
 #### BEGIN SHINY UI AND SERVER SETTINGS ####
 
 ui <- fluidPage(
   useShinyjs(),
-  tags$head(tags$style('body {font-family: Arial;}')),
+  tags$head(
+    tags$link(rel = "stylesheet", type = "text/css", href = "www/style.css")),
   titlePanel("SEACAR Continuous WQ Dashboard"),
   fluidRow(
     column(4,
@@ -356,14 +408,14 @@ ui <- fluidPage(
   ),
   fluidRow(
     column(5,
-      checkboxGroupInput("habitat", 
-                         label = "Toggle species habitat sampling",
-                         choiceValues = habs,
-                         choiceNames = c("Submerged Aquatic Vegetation","Nekton",
-                                         "Coral/Coral Reef","Oyster/Oyster Reef",
-                                         "Coastal Wetlands"),
-                         selected = NULL, inline = TRUE)
-      )
+           checkboxGroupInput("habitat", 
+                              label = "Toggle species habitat sampling",
+                              choiceValues = habs,
+                              choiceNames = c("Submerged Aquatic Vegetation","Nekton",
+                                              "Coral/Coral Reef","Oyster/Oyster Reef",
+                                              "Coastal Wetlands"),
+                              selected = NULL, inline = TRUE)
+    )
   ),
   fluidRow(
     column(4,
@@ -376,14 +428,24 @@ ui <- fluidPage(
     column(8,
            shinyjs::hidden(
              wellPanel(id="hide_text",
-               htmlOutput("skt_text")
+                       htmlOutput("skt_text")
              ))
-           )
+    )
   ),
   
   fluidRow(
     column(12,
            DT::DTOutput("entity_overview_table")),
+  ),
+  
+  fluidRow(
+    column(3),
+    column(6,
+           wellPanel(
+             htmlOutput("funding")
+           )),
+    column(3)
+    
   )
 )
 
@@ -428,9 +490,9 @@ server <- function(input, output, session){
       rownames = FALSE,
       style = "bootstrap",
       options = list(
-                paging=TRUE,
-                pageLength=nrow(data)
-              ))
+        paging=TRUE,
+        pageLength=nrow(data)
+      ))
   })
   
   observeEvent(input$select_button, {
@@ -454,6 +516,10 @@ server <- function(input, output, session){
   
   output$skt_text <- renderUI({
     HTML(explanatory_text)
+  })
+  
+  output$funding <- renderUI({
+    HTML(funding_text)
   })
   
   observe({
@@ -481,10 +547,12 @@ server <- function(input, output, session){
 
 shinyApp(ui = ui, server = server)
 
+# library(rsconnect)
 # deployApp(appFiles = c("app.R","data/skt_combined.rds", "data/YM_combined.rds",
 #                        "rds/df_gaps.rds", "rds/df_gaps_by_entity.rds",
 #                        "rds/map_df.rds", "rds/pal.rds",
 #                        "rds/species_sample_locations_pt.rds",
 #                        "rds/table_display.rds",
 #                        "rds/table_display_by_entity.rds",
-#                        "README.md"))
+#                        "README.md", "www/dep-logos.png",
+#                        "www/style.css"))
