@@ -1,7 +1,6 @@
 # Continuous Water Quality Dashboard
 
-The live version of the [Continuous Water Quality Dashboard](https://tylerhill.shinyapps.io/seacar-dashboards/)
-
+The live version of the [Continuous Water Quality Dashboard](https://floridaseacar.shinyapps.io/continuous_wq/)
 ## Script Overview
 
 This script utilizes modularized .RDS objects to help save on server-side memory. The objects are created using the following scripts, and imported into app.R to launch the app:
