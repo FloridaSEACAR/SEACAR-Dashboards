@@ -18,9 +18,6 @@ library(shinyjs)
 # process_data.R creates .RDS objects which are loaded within app.R when deployed
 # source("process_data.R")
 
-# add publish date beneath funding acknowledgement to show date of latest update
-publish_date <- Sys.Date()
-
 # SEACAR Plot theme
 plot_theme <- theme_bw() +
   theme(panel.grid.major = element_blank(),
@@ -88,7 +85,7 @@ entities <- c("All",highlights,
 
 ## Functions for use within Shiny
 # Variable table display
-display_table <- function(entity){
+display_table <- function(entity,activeStatus){
   if(entity=="All"){
     table_display %>% ungroup() %>%
       select(-c(link2)) %>%
@@ -97,7 +94,8 @@ display_table <- function(entity){
              "Number of Stations" = NumStations,
              "Number of Observations" = Data_N)
   } else {
-    table_display_by_entity %>% filter(Entity==entity) %>%
+    table_display_by_entity %>% filter(Entity==entity,
+                                       Status %in% activeStatus) %>%
       ungroup() %>% select(-Entity) %>%
       group_by(ProgramLocationID, ProgramNameLink, Status) %>%
       summarise(
@@ -112,8 +110,9 @@ display_table <- function(entity){
   }
 }
 
-display_long_table <- function(entity){
-  table_display_by_entity %>% filter(Entity==entity) %>% 
+display_long_table <- function(entity, activeStatus){
+  table_display_by_entity %>% filter(Entity==entity,
+                                     Status %in% activeStatus) %>% 
     ungroup() %>% select(-c(Entity, ProgramName, link)) %>%
     rename(ProgramName = ProgramNameLink) %>%
     select(ProgramName, ProgramLocationID, Data_N, Status, Parameter, SufficientData)
@@ -123,7 +122,9 @@ display_long_table <- function(entity){
 df_gaps$Entity <- fct_rev(factor(df_gaps$Entity))
 
 # Function to serve gannt plots
-plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Program"){
+plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Program",
+                       activeStatus = "Active"){
+  
   if(type=="All"){
     
     min_year <- min(df_gaps$startYear)
@@ -139,50 +140,55 @@ plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Prog
       plot_theme + theme(panel.background = element_rect(fill="gray97"))
     
   } else if(type=="Entity"){
-    filtered_df <- df_gaps_by_entity %>% 
-      filter(Entity==ent)
     
-    # Shorten APCWQ and NERR SWMP for display in Gantt plot
-    if(ent=="Aquatic Preserve Continuous Water Quality Program"){
-      filtered_df <- filtered_df %>%
+    if(length(activeStatus)>0){
+      
+      # Filter by entity
+      # Shorten APCWQ and NERR SWMP for display in Gantt plot
+      pal_df <- df_gaps_by_entity %>% 
+        filter(Entity==ent) %>%
         mutate(ProgramName = str_replace_all(ProgramName, c(
           "Aquatic Preserves Continuous Water Quality Monitoring" = "APCWQ",
-          "Aquatic Preserve Continuous Water Quality Monitoring" = "APCWQ")))
-    } else if(ent=="National Estuarine Research Reserve SWMP"){
-      filtered_df <- filtered_df %>%
-        mutate(ProgramName = str_replace_all(ProgramName, c(
+          "Aquatic Preserve Continuous Water Quality Monitoring" = "APCWQ",
           "National Estuarine Research Reserve System-Wide Monitoring Program" = "NERR SWMP")))
+      
+      # Filter further by Status
+      # filtered_df and pal_df separate to keep palette intact
+      filtered_df <- pal_df %>% 
+        filter(Status %in% activeStatus)
+      
+      # Allows color palette to display for unique programs in APCWQ and NERR SWMP
+      # Set secondary color palette (by Program instead of Entity)
+      pal2 <- colorFactor(seacar_palette, unique(pal_df$ProgramName))
+      
+      if(ent %in% highlights){
+        program_pal <- pal2(unique(filtered_df$ProgramName))
+      } else {
+        program_pal <- pal(unique(filtered_df$Entity))
+      }
+      
+      names(program_pal) <- unique(filtered_df$ProgramName)
+      
+      filtered_df$ProgramName <- factor(filtered_df$ProgramName)
+      
+      min_year <- min(filtered_df$startYear)
+      max_year <- max(filtered_df$endYear)
+      
+      plot <- ggplot(filtered_df,
+                     aes(x=startYear, xend=endYear, 
+                         y=ProgramLocationID, yend=ProgramLocationID)) +
+        geom_segment(linewidth=4, aes(color=filtered_df$ProgramName)) +
+        labs(title=paste0(ent, " - Years of data for each Station"),
+             x="Years",
+             y="ProgramLocationID",
+             color="Program") +
+        scale_y_discrete(limits = unique(filtered_df$ProgramLocationID)) +
+        scale_color_manual(values=program_pal) +
+        scale_x_continuous(limits=c(min_year, max_year),
+                           breaks=seq(max_year, min_year, -2)) +
+        plot_theme + theme(panel.background = element_rect(fill="gray97"))
+      
     }
-    # Set secondary color palette (by Program instead of Entity)
-    pal2 <- colorFactor(seacar_palette, unique(filtered_df$ProgramName))
-    # Allows color palette to display for unique programs in APCWQ and NERR SWMP
-    if(ent %in% highlights){
-      program_pal <- pal2(unique(filtered_df$ProgramName))
-    } else {
-      program_pal <- pal(unique(filtered_df$Entity))
-    }
-    
-    names(program_pal) <- unique(filtered_df$ProgramName)
-    
-    filtered_df$ProgramName <- factor(filtered_df$ProgramName)
-    
-    min_year <- min(filtered_df$startYear)
-    max_year <- max(filtered_df$endYear)
-    
-    plot <- ggplot(filtered_df,
-                   aes(x=startYear, xend=endYear, 
-                       y=ProgramLocationID, yend=ProgramLocationID)) +
-      geom_segment(linewidth=4, aes(color=filtered_df$ProgramName)) +
-      labs(title=paste0(ent, " - Years of data for each Station"),
-           x="Years",
-           y="ProgramLocationID",
-           color="Program") +
-      scale_y_discrete(limits = unique(filtered_df$ProgramLocationID)) +
-      scale_color_manual(values=program_pal) +
-      scale_x_continuous(limits=c(min_year, max_year),
-                         breaks=seq(max_year, min_year, -2)) +
-      plot_theme + theme(panel.background = element_rect(fill="gray97"))
-    
   }
   return(plot)
 }
@@ -423,7 +429,15 @@ ui <- fluidPage(
              selectInput(inputId = "entitySelect",
                          label = "Select Entity to view",
                          choices = entities,
-                         selected = "All"))
+                         selected = "All"),
+             checkboxGroupInput(inputId = "activeSelect",
+                                label = "View Historical or Active sites",
+                                choices = c("Active","Historical"),
+                                selected = c("Active","Historical")),
+             shinyjs::hidden(
+               textOutput("activeSelectText"))
+             )
+             
     ),
     column(8,
            shinyjs::hidden(
@@ -455,17 +469,19 @@ server <- function(input, output, session){
   
   e <- reactive({input$entitySelect})
   
+  active <- reactive({input$activeSelect})
+  
   type <- reactive({if(e()=="All"){"All"}else{"Entity"}})
   
   stations <- reactive({
     if(e()!="All"){
-      unique(display_long_table(e())$ProgramLocationID)
+      unique(display_long_table(e(), activeStatus=active())$ProgramLocationID)
     }
   })
   
   params <- reactive({
     if(e()!="All"){
-      display_long_table(e()) %>% 
+      display_long_table(e(), activeStatus=active()) %>% 
         filter(ProgramLocationID==input$stationSelect,
                SufficientData==TRUE) %>% 
         pull(Parameter)
@@ -477,11 +493,12 @@ server <- function(input, output, session){
       hideGroup(habs)
   })
   
-  output$gantt_plot <- renderPlot(plot_gantt(type=type(), ent=e()))
+  output$gantt_plot <- renderPlot(plot_gantt(type=type(), ent=e(),
+                                             activeStatus=active()))
   
   output$entity_overview_table <- DT::renderDT({
     
-    data <- setDT(display_table(e()))
+    data <- setDT(display_table(e(), activeStatus=active()))
     
     DT::datatable(
       data,
@@ -522,18 +539,22 @@ server <- function(input, output, session){
     HTML(funding_text)
   })
   
+  output$activeSelectText <- renderText(active())
+  
   observe({
     if(e()=="All"){
       leafletProxy("map") %>%
         showGroup(unique(df_gaps$Entity)) %>%
         hideGroup(entities_plus)
       shinyjs::hideElement(id="hide_text")
+      shinyjs::hideElement(id="activeSelect")
     } else {
       leafletProxy("map") %>%
         showGroup(paste0(e(), "_by_entity")) %>% 
         hideGroup(entities_plus[!entities_plus %in% paste0(e(), "_by_entity")]) %>%
         hideGroup(entities)
       shinyjs::showElement(id="hide_text")
+      shinyjs::showElement(id="activeSelect")
     }
   })
   

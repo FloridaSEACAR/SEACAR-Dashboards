@@ -193,9 +193,9 @@ df_gaps_by_entity <- site_years %>%
   group_by(Entity, ProgramLocationID, ProgramName) %>%
   summarize(gap_years = list(find_gaps(Years))) %>%
   unnest(cols = c(gap_years)) %>%
-  arrange(ProgramName, ProgramLocationID)
+  arrange(ProgramName, ProgramLocationID) %>%
+  mutate(Status = ifelse(endYear >= year(active_date), "Active", "Historical"))
 setDT(df_gaps_by_entity)
-df_gaps_by_entity[startYear==endYear, `:=` (endYear = endYear+0.001)]
 
 # Entity-level Table display
 table_display <- df %>% 
@@ -263,3 +263,7 @@ for(file in files_to_save){
   saveRDS(get(file), file=paste0("rds/",file,".rds"))
 }
 
+# add publish date beneath funding acknowledgement to show date of latest update
+publish_date <- Sys.Date()
+
+plot_gantt("All")
