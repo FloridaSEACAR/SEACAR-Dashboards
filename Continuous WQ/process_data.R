@@ -331,3 +331,7 @@ for(file in files_to_save){
   saveRDS(get(file), file=paste0("rds/",file,".rds"))
 }
 
+# add publish date beneath funding acknowledgement to show date of latest update
+publish_date <- Sys.Date()
+
+plot_gantt("All")
