@@ -18,9 +18,6 @@ library(shinyjs)
 # process_data.R creates .RDS objects which are loaded within app.R when deployed
 # source("process_data.R")
 
-# add publish date beneath funding acknowledgement to show date of latest update
-publish_date <- Sys.Date()
-
 # SEACAR Plot theme
 plot_theme <- theme_bw() +
   theme(panel.grid.major = element_blank(),
@@ -64,7 +61,8 @@ seacar_sp_palette <- c("#005396","#0088B1","#00ADAE","#65CCB3","#AEE4C1",
 # use the following lines to load objects created in process_data.R
 files_to_load <- c("df_gaps", "df_gaps_by_entity", "map_df",
                    "table_display", "table_display_by_entity", "pal",
-                   "species_sample_locations_pt")
+                   "species_sample_locations_pt", "publish_date","YM_combined", 
+                   "skt_combined")
 
 for(file in files_to_load){
   eval(call("<-", as.name(file), readRDS(paste0("rds/",file,".rds"))))
@@ -88,16 +86,17 @@ entities <- c("All",highlights,
 
 ## Functions for use within Shiny
 # Variable table display
-display_table <- function(entity){
+display_table <- function(entity,activeStatus){
   if(entity=="All"){
-    table_display %>% ungroup() %>%
+    table_display %>% filter(Status %in% activeStatus) %>% ungroup() %>%
       select(-c(link2)) %>%
       select(Entity, NumStations, Data_N, Status, IncludedParams) %>%
       rename(Parameters = IncludedParams,
              "Number of Stations" = NumStations,
              "Number of Observations" = Data_N)
   } else {
-    table_display_by_entity %>% filter(Entity==entity) %>%
+    table_display_by_entity %>% filter(Entity==entity,
+                                       Status %in% activeStatus) %>%
       ungroup() %>% select(-Entity) %>%
       group_by(ProgramLocationID, ProgramNameLink, Status) %>%
       summarise(
@@ -112,8 +111,9 @@ display_table <- function(entity){
   }
 }
 
-display_long_table <- function(entity){
-  table_display_by_entity %>% filter(Entity==entity) %>% 
+display_long_table <- function(entity, activeStatus){
+  table_display_by_entity %>% filter(Entity==entity,
+                                     Status %in% activeStatus) %>% 
     ungroup() %>% select(-c(Entity, ProgramName, link)) %>%
     rename(ProgramName = ProgramNameLink) %>%
     select(ProgramName, ProgramLocationID, Data_N, Status, Parameter, SufficientData)
@@ -123,66 +123,78 @@ display_long_table <- function(entity){
 df_gaps$Entity <- fct_rev(factor(df_gaps$Entity))
 
 # Function to serve gannt plots
-plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Program"){
+plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Program",
+                       activeStatus = "Active"){
+  
   if(type=="All"){
+    
+    if(length(activeStatus)>0){
+      df_gaps <- df_gaps %>% filter(Status %in% activeStatus)
+    }
     
     min_year <- min(df_gaps$startYear)
     max_year <- max(df_gaps$endYear)
     
-    plot <- ggplot(df_gaps, aes(x=startYear, xend=endYear, y=Entity, yend=Entity)) +
+    plot <- ggplot(df_gaps, 
+                   aes(x=startYear, xend=endYear, y=Entity, yend=Entity)) +
       geom_segment(linewidth=4, colour=pal(df_gaps$Entity)) +
       labs(title="Years of data for each Entity",
            x="Years",
            y="Entity") + 
       scale_x_continuous(limits=c(min_year, max_year),
                          breaks=seq(max_year, min_year, -2)) +
-      plot_theme + theme(panel.background = element_rect(fill="gray97"))
+      plot_theme + theme(panel.background = element_rect(fill="gray97"))      
     
   } else if(type=="Entity"){
-    filtered_df <- df_gaps_by_entity %>% 
-      filter(Entity==ent)
     
-    # Shorten APCWQ and NERR SWMP for display in Gantt plot
-    if(ent=="Aquatic Preserve Continuous Water Quality Program"){
-      filtered_df <- filtered_df %>%
+    if(length(activeStatus)>0){
+      
+      # Filter by entity
+      # Shorten APCWQ and NERR SWMP for display in Gantt plot
+      pal_df <- df_gaps_by_entity %>% 
+        filter(Entity==ent) %>%
         mutate(ProgramName = str_replace_all(ProgramName, c(
           "Aquatic Preserves Continuous Water Quality Monitoring" = "APCWQ",
-          "Aquatic Preserve Continuous Water Quality Monitoring" = "APCWQ")))
-    } else if(ent=="National Estuarine Research Reserve SWMP"){
-      filtered_df <- filtered_df %>%
-        mutate(ProgramName = str_replace_all(ProgramName, c(
+          "Aquatic Preserve Continuous Water Quality Monitoring" = "APCWQ",
           "National Estuarine Research Reserve System-Wide Monitoring Program" = "NERR SWMP")))
+      
+      # Filter further by Status
+      # filtered_df and pal_df separate to keep palette intact
+      filtered_df <- pal_df %>% 
+        filter(Status %in% activeStatus)
+      
+      # Allows color palette to display for unique programs in APCWQ and NERR SWMP
+      # Set secondary color palette (by Program instead of Entity)
+      pal2 <- colorFactor(seacar_palette, unique(pal_df$ProgramName))
+      
+      if(ent %in% highlights){
+        program_pal <- pal2(unique(filtered_df$ProgramName))
+      } else {
+        program_pal <- pal(unique(filtered_df$Entity))
+      }
+      
+      names(program_pal) <- unique(filtered_df$ProgramName)
+      
+      filtered_df$ProgramName <- factor(filtered_df$ProgramName)
+      
+      min_year <- min(filtered_df$startYear)
+      max_year <- max(filtered_df$endYear)
+      
+      plot <- ggplot(filtered_df,
+                     aes(x=startYear, xend=endYear, 
+                         y=ProgramLocationID, yend=ProgramLocationID)) +
+        geom_segment(linewidth=4, aes(color=filtered_df$ProgramName)) +
+        labs(title=paste0(ent, " - Years of data for each Station"),
+             x="Years",
+             y="ProgramLocationID",
+             color="Program") +
+        scale_y_discrete(limits = unique(filtered_df$ProgramLocationID)) +
+        scale_color_manual(values=program_pal) +
+        scale_x_continuous(limits=c(min_year, max_year),
+                           breaks=seq(max_year, min_year, -2)) +
+        plot_theme + theme(panel.background = element_rect(fill="gray97"))
+      
     }
-    # Set secondary color palette (by Program instead of Entity)
-    pal2 <- colorFactor(seacar_palette, unique(filtered_df$ProgramName))
-    # Allows color palette to display for unique programs in APCWQ and NERR SWMP
-    if(ent %in% highlights){
-      program_pal <- pal2(unique(filtered_df$ProgramName))
-    } else {
-      program_pal <- pal(unique(filtered_df$Entity))
-    }
-    
-    names(program_pal) <- unique(filtered_df$ProgramName)
-    
-    filtered_df$ProgramName <- factor(filtered_df$ProgramName)
-    
-    min_year <- min(filtered_df$startYear)
-    max_year <- max(filtered_df$endYear)
-    
-    plot <- ggplot(filtered_df,
-                   aes(x=startYear, xend=endYear, 
-                       y=ProgramLocationID, yend=ProgramLocationID)) +
-      geom_segment(linewidth=4, aes(color=filtered_df$ProgramName)) +
-      labs(title=paste0(ent, " - Years of data for each Station"),
-           x="Years",
-           y="ProgramLocationID",
-           color="Program") +
-      scale_y_discrete(limits = unique(filtered_df$ProgramLocationID)) +
-      scale_color_manual(values=program_pal) +
-      scale_x_continuous(limits=c(min_year, max_year),
-                         breaks=seq(max_year, min_year, -2)) +
-      plot_theme + theme(panel.background = element_rect(fill="gray97"))
-    
   }
   return(plot)
 }
@@ -197,39 +209,52 @@ ents <- unique(map_df$Entity)
 
 for(e in ents){
   
-  filtered_data <- map_df %>% filter(Entity==e)
+  filtered_data <- map_df[Entity==e, ]
   
-  leaflet_map <- leaflet_map %>%
-    addCircleMarkers(data = filtered_data, 
-               lat=~Lat, lng=~Lon, fillColor=~pal(Entity),
-               weight=0.5, radius=~rad, 
-               fillOpacity=0.4, opacity=0.4, color="black",
-               popup = ~popup,
-               label = ~label,
-               group = e)
+  for(stat in unique(filtered_data$Status)){
+    leaflet_map <- leaflet_map %>%
+      addCircleMarkers(data = filtered_data[Status==stat, ], 
+                       lat=~Lat, lng=~Lon, fillColor=~pal(Entity),
+                       weight=0.5, radius=~rad,
+                       fillOpacity=0.4, opacity=0.4, color="black",
+                       popup = ~popup,
+                       label = ~label,
+                       group = paste0("All_",stat))
+  }
   
   pal2 <- colorFactor(seacar_palette, unique(filtered_data$ProgramName))
   program_pal <- pal2(unique(filtered_data$ProgramName))
   names(program_pal) <- unique(filtered_data$ProgramName)
   
   if(e %in% highlights){
-    leaflet_map <- leaflet_map %>%
-      addCircleMarkers(data = filtered_data[Entity %in% highlights, ],
-                 lat=~Lat, lng=~Lon, fillColor=~pal2(ProgramName),
-                 weight=0.5, radius=~rad, 
-                 fillOpacity=0.6, opacity=0.6, color="black",
-                 popup = ~popup,
-                 label = ~label, 
-                 group=paste0(e, "_by_entity"))
+    # Active vs. Historical
+    for(stat in unique(filtered_data$Status)){
+      stat_data <- filtered_data[Entity %in% highlights & Status==stat, ]
+      
+      leaflet_map <- leaflet_map %>%
+        addCircleMarkers(data = stat_data,
+                         lat=~Lat, lng=~Lon, fillColor=~pal2(ProgramName),
+                         weight=0.5, radius=~rad, 
+                         fillOpacity=0.6, opacity=0.6, color="black",
+                         popup = ~popup,
+                         label = ~label, 
+                         group=paste0(e, "_by_entity","_",stat))
+    }
+    
   } else if(!e %in% highlights){
-    leaflet_map <- leaflet_map %>%
-      addCircleMarkers(data = filtered_data[!Entity %in% highlights, ],
-                 lat=~Lat, lng=~Lon, fillColor=~pal(Entity),
-                 weight=0.5, radius=~rad, 
-                 fillOpacity=0.6, opacity=0.6, color="black",
-                 popup = ~popup,
-                 label = ~label, 
-                 group=paste0(e, "_by_entity"))
+    # Active vs. Historical
+    for(stat in unique(filtered_data$Status)){
+      stat_data <- filtered_data[!Entity %in% highlights & Status==stat, ]
+      
+      leaflet_map <- leaflet_map %>%
+        addCircleMarkers(data = stat_data,
+                         lat=~Lat, lng=~Lon, fillColor=~pal(Entity),
+                         weight=0.5, radius=~rad, 
+                         fillOpacity=0.6, opacity=0.6, color="black",
+                         popup = ~popup,
+                         label = ~label, 
+                         group=paste0(e, "_by_entity","_",stat))
+    }
   }
 }
 
@@ -252,13 +277,16 @@ for(hab in habs){
 
 # leaflet_map <- leaflet_map %>%
 #   addLayersControl(baseGroups = c("Positron by CartoDB"),
-#                    overlayGroups = c(entities, paste0(entities, "_by_entity"),
+#                    overlayGroups = c("All_Historical","All_Active",
+#                                      paste0(entities[entities!="All"], "_by_entity_Active"),
+#                                      paste0(entities[entities!="All"], "_by_entity_Historical"),
 #                                      habs),
 #                    options = layersControlOptions(collapsed=TRUE))
 
+# UNCOMMENTED FOR EB01 FIX
 # Load in necessary files for continuous SKT plots
-YM_combined <- readRDS("data/YM_combined.rds")
-skt_combined <- readRDS("data/skt_combined.rds")
+# YM_combined <- readRDS("data/YM_combined.rds")
+# skt_combined <- readRDS("data/skt_combined.rds")
 
 # Creating units datatable for display in plots
 cont_param_df <- data.table(
@@ -423,7 +451,15 @@ ui <- fluidPage(
              selectInput(inputId = "entitySelect",
                          label = "Select Entity to view",
                          choices = entities,
-                         selected = "All"))
+                         selected = "All"),
+             checkboxGroupInput(inputId = "activeSelect",
+                                label = "View Historical or Active sites",
+                                choices = c("Active","Historical"),
+                                selected = c("Active","Historical")),
+             shinyjs::hidden(
+               textOutput("activeSelectText"))
+           )
+           
     ),
     column(8,
            shinyjs::hidden(
@@ -449,23 +485,26 @@ ui <- fluidPage(
   )
 )
 
-entities_plus <- paste0(entities, "_by_entity")
+entities_plus <- c(paste0(entities[entities!="All"], "_by_entity_Active"),
+                   paste0(entities[entities!="All"], "_by_entity_Historical"))
 
 server <- function(input, output, session){
   
   e <- reactive({input$entitySelect})
   
+  active <- reactive({input$activeSelect})
+  
   type <- reactive({if(e()=="All"){"All"}else{"Entity"}})
   
   stations <- reactive({
     if(e()!="All"){
-      unique(display_long_table(e())$ProgramLocationID)
+      unique(display_long_table(e(), activeStatus=active())$ProgramLocationID)
     }
   })
   
   params <- reactive({
     if(e()!="All"){
-      display_long_table(e()) %>% 
+      display_long_table(e(), activeStatus=active()) %>% 
         filter(ProgramLocationID==input$stationSelect,
                SufficientData==TRUE) %>% 
         pull(Parameter)
@@ -477,11 +516,12 @@ server <- function(input, output, session){
       hideGroup(habs)
   })
   
-  output$gantt_plot <- renderPlot(plot_gantt(type=type(), ent=e()))
+  output$gantt_plot <- renderPlot(plot_gantt(type=type(), ent=e(),
+                                             activeStatus=active()))
   
   output$entity_overview_table <- DT::renderDT({
     
-    data <- setDT(display_table(e()))
+    data <- setDT(display_table(e(), activeStatus=active()))
     
     DT::datatable(
       data,
@@ -522,18 +562,74 @@ server <- function(input, output, session){
     HTML(funding_text)
   })
   
+  activeChoices <- reactive({
+    unique(display_table(e(), activeStatus=c("Active","Historical"))$Status)
+  })
+  
+  
+  observeEvent(input$entitySelect, {
+    updateCheckboxGroupInput(session = session,
+                             inputId = "activeSelect",
+                             choices = activeChoices(),
+                             selected = activeChoices())
+  })
+  
+  output$activeSelectText <- renderText(active())
+  
   observe({
     if(e()=="All"){
-      leafletProxy("map") %>%
-        showGroup(unique(df_gaps$Entity)) %>%
-        hideGroup(entities_plus)
+      
+      active_groups <- character()
+      inactive_groups <- c(entities_plus,"All_Active","All_Historical")
+      remove <- character()
+      
+      if("Active" %in% active()){
+        active_groups <- c(active_groups, "All_Active")
+        remove <- c(remove,"All_Active")
+      }
+      
+      if("Historical" %in% active()){
+        active_groups <- c(active_groups, "All_Historical")
+        remove <- c(remove,"All_Historical")
+      }
+      
+      if(length(active_groups) > 0){
+        leafletProxy("map") %>% showGroup(active_groups)
+      }
+      
+      if(length(inactive_groups) > 0){
+        leafletProxy("map") %>% hideGroup(inactive_groups[!inactive_groups %in% remove])
+      }
+
       shinyjs::hideElement(id="hide_text")
+      shinyjs::showElement(id="activeSelect")
     } else {
-      leafletProxy("map") %>%
-        showGroup(paste0(e(), "_by_entity")) %>% 
-        hideGroup(entities_plus[!entities_plus %in% paste0(e(), "_by_entity")]) %>%
-        hideGroup(entities)
+      
+      active_groups <- character()
+      inactive_groups <- entities_plus
+      
+      if("Active" %in% active()){
+        active_groups <- c(active_groups, paste0(e(), "_by_entity_Active"))
+        inactive_groups <- setdiff(inactive_groups, paste0(e(), "_by_entity_Active"))
+      }
+      
+      if("Historical" %in% active()){
+        active_groups <- c(active_groups, paste0(e(), "_by_entity_Historical"))
+        inactive_groups <- setdiff(inactive_groups, paste0(e(), "_by_entity_Historical"))
+      }
+      
+      if(length(active_groups) > 0){
+        leafletProxy("map") %>% showGroup(active_groups) %>% 
+          hideGroup(c("All_Historical","All_Active"))
+      }
+      
+      if(length(inactive_groups) > 0){
+        leafletProxy("map") %>% hideGroup(inactive_groups) %>% 
+          hideGroup(c("All_Historical","All_Active"))
+      }
+      
       shinyjs::showElement(id="hide_text")
+      shinyjs::showElement(id="activeSelect")
     }
   })
   
@@ -548,11 +644,24 @@ server <- function(input, output, session){
 shinyApp(ui = ui, server = server)
 
 # library(rsconnect)
+## USE BELOW FOR EB01 FIX
+# deployApp(appFiles = c("app.R","rds/skt_combined.rds", "rds/YM_combined.rds",
+#                        "rds/df_gaps.rds", "rds/df_gaps_by_entity.rds",
+#                        "rds/map_df.rds", "rds/pal.rds",
+#                        "rds/species_sample_locations_pt.rds",
+#                        "rds/table_display.rds",
+#                        "rds/table_display_by_entity.rds",
+#                        "rds/publish_date.rds",
+#                        "README.md", "www/dep-logos.png",
+#                        "www/style.css"))
+
+
 # deployApp(appFiles = c("app.R","data/skt_combined.rds", "data/YM_combined.rds",
 #                        "rds/df_gaps.rds", "rds/df_gaps_by_entity.rds",
 #                        "rds/map_df.rds", "rds/pal.rds",
 #                        "rds/species_sample_locations_pt.rds",
 #                        "rds/table_display.rds",
 #                        "rds/table_display_by_entity.rds",
+#                        "rds/publish_date.rds",
 #                        "README.md", "www/dep-logos.png",
 #                        "www/style.css"))

@@ -1,10 +1,21 @@
 library(sf)
 library(xlsx)
+library(stringr)
+library(rstudioapi)
+
+wd <- dirname(getActiveDocumentContext()$path)
+setwd(wd)
 
 source("seacar_data_location.R") # import data location variable
 
+# Create .rds folder if it doesn't already exist
+for(path in c("rds")){if(!dir.exists(path)){dir.create(path)}}
+
 # Determine Active sites dynamically based on current date minus 1 Year
 active_date <- ymd(Sys.Date()) - years(1)
+
+# add publish date beneath funding acknowledgement to show date of latest update
+publish_date <- Sys.Date()
 
 # Custom SEACAR palette
 seacar_palette <- c(
@@ -60,6 +71,38 @@ for(p in names(data_directory)){
   data <- bind_rows(data, bind_rows(data_directory[[p]]))
 }
 
+### TEMPORARY FIX TO INCLUDE EB01 STATION DATA FROM EARLIER EXPORT ###
+eb_files <- list.files(paste0(seacar_data_location,"/archive/2024-Apr-15"), 
+                       pattern = "_cont_", full.names = TRUE)
+eb_files <- str_subset(eb_files, "_SW")
+eb_data <- data.table()
+for(file in eb_files){
+  # Import data
+  data_temp <- fread(file, sep='|', na.strings = "NULL")
+  # Find parameter name, region
+  param <- unique(data_temp$ParameterName)
+  region <- unique(data_temp$Region)
+  # Group data by PLID & Year, compute Data_N, necessary info
+  grouped_df <- data_temp %>%
+    group_by(ProgramLocationID, Year) %>%
+    reframe(Data_N = n(),
+            ProgramID = unique(ProgramID), 
+            ProgramName = unique(ProgramName),
+            ManagedAreaName = unique(ManagedAreaName),
+            Region = unique(Region),
+            Parameter = unique(ParameterName),
+            Units = unique(ParameterUnits),
+            Lat = unique(OriginalLatitude),
+            Lon = unique(OriginalLongitude))
+  # Append to data directory
+  eb_data <- bind_rows(eb_data, grouped_df)
+  print(paste0("Processing ", param, " - ", region, " completed"))
+}
+rm(data_temp, grouped_df)
+eb_data <- eb_data[ProgramLocationID=="EB01", ]
+data <- bind_rows(data, eb_data)
+#####################################################################
+
 ### GATHER SPECIES SAMPLING SITES
 species_sites <- data.table()
 # Read in species-based Habitat files to plot their locations
@@ -73,7 +116,10 @@ for(h_file in hab_files){
 }
 
 # Reading in sample locations files (pt)
-sample_locs_pt <- st_read(paste0(seacar_shape_location, "/SampleLocations12mar2024/vw_SampleLocation_Point.shp"))
+sample_loc_date <- "6june2024"
+loc_files <- list.files(paste0(seacar_shape_location, "/SampleLocations",sample_loc_date), pattern = ".shp", full.names = TRUE)
+pt_file <- str_subset(str_subset(loc_files, "_Point"), ".xml", negate = TRUE)
+sample_locs_pt <- st_read(pt_file)
 
 sample_locs_pt <- sample_locs_pt %>% filter(ProgramLoc %in% unique(species_sites$ProgramLocationID))
 
@@ -180,6 +226,8 @@ df_gaps$Entity <- factor(df_gaps$Entity,
                          levels = c(highlights,
                                     unique(df_gaps$Entity[
                                       !df_gaps$Entity %in% highlights])))
+df_gaps <- df_gaps %>% 
+  mutate(Status = ifelse(endYear >= year(active_date), "Active", "Historical"))
 
 # Summary stats for each ProgramLocationID within each Entity
 site_years <- df %>%
@@ -193,9 +241,9 @@ df_gaps_by_entity <- site_years %>%
   group_by(Entity, ProgramLocationID, ProgramName) %>%
   summarize(gap_years = list(find_gaps(Years))) %>%
   unnest(cols = c(gap_years)) %>%
-  arrange(ProgramName, ProgramLocationID)
+  arrange(ProgramName, ProgramLocationID) %>%
+  mutate(Status = ifelse(endYear >= year(active_date), "Active", "Historical"))
 setDT(df_gaps_by_entity)
-df_gaps_by_entity[startYear==endYear, `:=` (endYear = endYear+0.001)]
 
 # Entity-level Table display
 table_display <- df %>% 
@@ -228,6 +276,14 @@ table_display_by_entity <- df %>%
 # Load in SKT stats files to grab "SufficientData" column
 skt_combined <- readRDS("data/skt_combined.rds")
 
+### EB01 FIX ###
+skt_combined_old <- readRDS("data/skt_combined_old.rds")
+skt_combined <- bind_rows(skt_combined, skt_combined_old[ProgramLocationID=="EB01"])
+YM_combined <- readRDS("data/YM_combined.rds")
+YM_combined_old <- readRDS("data/YM_combined_old.rds")
+YM_combined <- bind_rows(YM_combined, YM_combined_old[ProgramLocationID=="EB01"])
+################
+
 table_display_by_entity <- merge(x=table_display_by_entity,
                                  y=skt_combined[,c("ProgramLocationID",
                                                    "ParameterName",
@@ -255,10 +311,22 @@ table_display_by_entity <- table_display_by_entity %>%
 # Formatting to display commas between data counts
 table_display_by_entity$Data_N <- formatC(table_display_by_entity$Data_N, format="d", big.mark = ",")
 
+# Add Active/Historical capability to map_df
+map_df <- map_df %>% 
+  mutate(Status = ifelse(YearMax >= year(active_date), "Active", "Historical"))
+
+#### TEMPORARY EB01 FIXES ####
+df_gaps_by_entity[ProgramLocationID=="EB01", `:=` (endYear = 2023,
+                                                   Status = "Active")]
+setDT(table_display_by_entity)
+table_display_by_entity[ProgramLocationID=="EB01", `:=` (Status = "Active")]
+##############################
+
 # SAVE RDS OBJECTS
 files_to_save <- c("df_gaps", "df_gaps_by_entity", "map_df",
                    "table_display", "table_display_by_entity", "pal",
-                   "species_sample_locations_pt")
+                   "species_sample_locations_pt", "publish_date", "YM_combined", 
+                   "skt_combined")
 for(file in files_to_save){
   saveRDS(get(file), file=paste0("rds/",file,".rds"))
 }
