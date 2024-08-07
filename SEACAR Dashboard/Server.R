@@ -1,3 +1,27 @@
+showPlot <- function(type, ma, ma_short, h){
+  src <- MA_All[Abbreviation==ma_short, get(type)]
+  hab_plot_types <- plot_df[habitat==h, unique(plot_type)]
+  
+  if (type %in% hab_plot_types) {
+    showModal(
+      modalDialog(
+        title = plot_df[plot_type==type, title],
+        tags$div(
+          tags$img(
+            src = src,
+            alt = plot_df[plot_type==type, alt],
+            height = "100%",
+            width = "100%"
+          ),
+          style = "text-align:center;"
+        ),
+        size = "m"
+      )
+    )
+  }
+}
+
+
 # Shiny Server ----
 server <- function(input, output, session){
   
@@ -8,8 +32,12 @@ server <- function(input, output, session){
       showGroup(habitat) %>%
       hideGroup(unname(habitats[str_detect(habitats, habitat, negate = T)]))
     
+    # ProgramName is ID used on back-end. names() displays format "PID - PName"
+    progs <- unique(data_directory[[input$habitatSelect]][["overviewTable"]]$ProgramName)    
+    names(progs) <- unique(data_directory[[input$habitatSelect]][["overviewTable"]]$pNameID)
+    
     updateSelectizeInput(inputId = "programSelect",
-                         choices = c("All",unique(data_directory[[input$habitatSelect]][["overviewTable"]]$ProgramName)))
+                         choices = c("All",progs))
     
     updateSelectizeInput(inputId = "maSelect",
                          choices = c("All",unique(data_directory[[input$habitatSelect]][["maSummTable"]]$ManagedAreaName)))
@@ -32,6 +60,8 @@ server <- function(input, output, session){
   pid <- reactive({input$programSelect})
   
   ma <- reactive({input$maSelect})
+  
+  param <- reactive({input$paramSelect})
   
   output$paramPlot <- renderPlot(plotProgramParams(habitat()))
   
@@ -66,7 +96,7 @@ server <- function(input, output, session){
     
     data <- setDT(displayOverviewTable(habitat(), pid(), type="program"))
     
-    DT::datatable(data[, -c("ProgramName")], escape = F, selection = "none", rownames = F, 
+    DT::datatable(data[, -c("ProgramName", "pNameID")], escape = F, selection = "none", rownames = F, 
                   style = "bootstrap", options = list(paging = T))
   })
   
@@ -74,38 +104,76 @@ server <- function(input, output, session){
     
     data <- setDT(displayOverviewTable(habitat(), ma(), type="ma"))
     
-    DT::datatable(data[, -c("ManagedAreaName")], escape = F, selection = "none", rownames = F, 
+    if(!ma()=="All"){data <- data[, -c("ManagedAreaName")]}
+    
+    DT::datatable(data, escape = F, selection = "none", rownames = F, 
                   style = "bootstrap", options = list(paging = T)
     )
   })
   
-  output$programInfo <- renderText({
-    pid()
+  output$programInfo <- renderText({pid()})
+  
+  output$managedAreaInfo <- renderText({ma()})
+  
+  output$maPrograms <- renderUI({
+    paste(data_directory[[habitat()]][["MAPrograms"]] %>% 
+            filter(ManagedAreaName==ma()) %>%
+            mutate(pNameID = paste0(ProgramID, " - ", ProgramName)) %>% 
+            pull(pNameID), 
+          collapse=", ")
   })
   
-  # output$paramBoxes <- renderUI({
-  #   params <- plotProgramParams(habitat(), "data")
-  #   lapply(1:nrow(params), function(i){
-  #     valueBox(value = paste0(params[i, "n"]),
-  #              subtitle = params[i, "ParameterName"],
-  #              width = 2, icon = icon(icon_df[param==params[i, 1], unique(icon)]))
-  #   })
-  # })
+  output$programMAs <- renderText({
+    paste(unique(data_directory[[habitat()]][["MAPrograms"]] %>% 
+             filter(ProgramName==pid()) %>%
+             pull(ManagedAreaName)), collapse=", ")
+  })
+  
+  output$habitatDescription <- renderUI({
+    div(style='max-width: fit-content; margin-left: auto; margin-right: auto;',
+        tags$h3(habitat()),
+        tags$p(habitatText(habitat())))
+  })
+  
+  output$programBoxes <- renderUI({
+    params <- plotProgramParams(habitat(), "data")
+    lapply(1:nrow(params), function(i){
+      valueBox(value = paste0(params[i, "n"]),
+               subtitle = params[i, "ParameterName"],
+               width = 4, icon = icon(icon_df[param==params[i, 1], unique(icon)]))
+    })
+  })
   
   output$plotLinks <- renderUI({
-    multiplot <- ifelse(MA_All[ManagedAreaName==ma(), multiplot]=="FALSE", FALSE, TRUE)
-    if(multiplot){
-      showModal(
-        modalDialog(
-          title = "Plots",
-          renderPlot(readRDS(MA_All[ManagedAreaName==ma(), multiplot]))
-        ))
-      renderText("multiplot LINK")
+    ma_short <- MA_All[ManagedAreaName == ma(), Abbreviation]
+    
+    if(!ma() == "All"){
+      hab_plot_types <- plot_df[habitat==habitat(), unique(plot_type)]
+      
+      out_list <- 
+        lapply(hab_plot_types, function(plot) {
+          plot_check <- MA_All[ManagedAreaName == ma(), get(plot)]
+          if (plot_check != "FALSE") {
+            actionLink(paste0(ma_short, "__", plot),
+                       label = plot_df[plot_type==plot, label],
+                       onclick = 'Shiny.onInputChange("select_button", this.id);')
+          }
+        })
+      
+      tagList(tags$ul(
+        purrr::map(out_list, function(.x) tags$li(.x))
+      ))
+    } else {
+      renderText("Links displayed here")
     }
   })
   
-  output$res_click <- renderPrint({
-    input$pieChart_click$id
+  observeEvent(input$select_button, {
+    ma_short <- str_split(input$select_button, "__")[[1]][[1]]
+    type <- str_split(input$select_button, "__")[[1]][[2]]
+    
+    showPlot(type=type, ma=ma(), ma_short=ma_short, h=habitat())
+    
   })
   
   observeEvent(input$pieChart_click, {
@@ -115,7 +183,7 @@ server <- function(input, output, session){
     nav_select(id = "habInfo", selected = input$pieChart_click$id)
   })
   
-  # output$discretePrograms <- renderTable(grouped_df)
+  output$discretePrograms <- renderTable(discretePrograms[ParameterName==param(), ])
   
   output$discreteProgramPlot <- renderPlot({
     ggplot(discProgramParams, 

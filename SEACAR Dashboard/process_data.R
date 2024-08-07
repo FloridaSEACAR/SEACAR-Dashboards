@@ -1,3 +1,6 @@
+# This script pre-processes combined tables and creates the necessary .RDS modules
+# for more efficient use in app.R.
+
 library(shiny)
 library(dplyr)
 library(leaflet)
@@ -9,6 +12,7 @@ library(rstudioapi)
 library(lubridate)
 library(sf)
 library(xlsx)
+library(tidyr)
 
 wd <- dirname(getActiveDocumentContext()$path)
 setwd(wd)
@@ -119,6 +123,10 @@ for(h in names(habitats)){
   data_directory[[habitat]][["programParams"]] <- data %>% 
     group_by(ParameterName) %>% summarise(n = length(unique(ProgramID)))
   
+  ### ProgramIDs for each ManagedArea
+  data_directory[[habitat]][["MAPrograms"]] <- data %>% 
+    group_by(ProgramID, ProgramName, ManagedAreaName) %>% summarise()
+  
   ### ProgramYearsPlots
   programYears <- data %>%
     group_by(ProgramID) %>% reframe(Years = unique(Year)) %>%
@@ -197,6 +205,7 @@ for(h in names(habitats)){
             "Number of Observations" = n(),
             "Years of Data" = length(unique(Year)),
             "Period of Record" = paste0(min(Year), " - ", max(Year))) %>%
+    mutate(pNameID = paste0(ProgramID, " - ", ProgramName)) %>%
     arrange(ProgramID)
   
   data_directory[[habitat]][["maOverviewTable"]] <- data %>%
@@ -215,18 +224,86 @@ for(h in names(habitats)){
 # rcp <- st_read(shape_file) %>% filter(LONG_NAME %in% unique(MA_Include)) %>% 
 #   select(-c(Mgmt_Unit, Acres, OBJECTID_1)) %>% st_transform('+proj=longlat +datum=WGS84')
 
-# Saving RDS objects ----
-rds_to_save <- c("data_directory", "allMapData") #"rcp"
-for(file in rds_to_save){
-  saveRDS(get(file), file=paste0("rds/",file,".rds"))
+### Discrete Water Quality data wrangling ----
+# Makes use of discrete data object outputs from MA Report Generation
+# Change folder date to select which objects to load (to match Atlas)
+disc_folder_date <- "2024-Mar-27"
+cont_folder_date <- "2024-Mar-27"
+
+# Point to location where Disc objects are located
+data_obj_loc <- "C:/Users/Hill_T/Desktop/SEACAR GitHub/SEACAR_Trend_Analyses/MA Report Generation/output/tables/"
+
+# Lists of disc and cont .rds objects to read
+disc_files <- list.files(paste0(data_obj_loc,"disc/",disc_folder_date,"/"),pattern = "\\.rds$", full.names = T)
+cont_files <- list.files(paste0(data_obj_loc,"cont/",cont_folder_date,"/"),pattern = "\\.rds$", full.names = T)
+
+# function of parameter, activity type, depth, with specified filetype
+# retrieves RDS filepath to be loaded
+get_files <- function(p, a, d, filetype) {
+  
+  # "data" contains overall data for each param, regardless of depth/activity
+  if (filetype == "data") {
+    pattern <- paste0(p,"_",filetype)
+  } else {
+    pattern <- paste0(p,"_",a,"_",d,"_",filetype)
+  }
+  # subset directory files for given pattern
+  file_return <- str_subset(disc_files, pattern)
+  return(file_return)
 }
 
-# Post-processing
+# Discrete & Continuous Combine necessary tables ----
+# Combine continuous/disc trend result tables for faster plot generation
+# Creates MA_MMYY_Stats_disc, Mon_YM_Stats_cont, skt_stats_disc, skt_stats_cont
+for(type in c("disc", "cont")){
+  # Specify table names and file lists for disc and cont
+  if(type=="disc"){
+    tables <- c("MA_MMYY_Stats", "skt_stats")
+    files <- disc_files
+  } else {
+    tables <- c("Mon_YM_Stats", "skt_stats")
+    files <- cont_files
+  }
+  
+  for(table in tables){
+    # Subset for desired RDS files
+    table_file <- str_subset(files, table)
+    # importing RDS files
+    df <- lapply(table_file, readRDS)
+    # Combine all regions into 1 single output dataframe
+    output <- do.call(rbind, df)
+    # Create variable of same name
+    eval(call("<-", as.name(paste0(table,"_",type)),output))
+  }
+}
+
+skt_stats_disc <- skt_stats_disc %>% 
+  mutate("Period of Record" = paste0(EarliestYear, " - ", LatestYear),
+         "Statistical Trend" = ifelse(p <= 0.05 & SennSlope > 0, "Significantly increasing trend",
+                                      ifelse(p <= 0.05 & SennSlope < 0, "Significantly decreasing trend", 
+                                             ifelse(SufficientData==FALSE, "Insufficient data to calculate trend",
+                                                    ifelse(SufficientData==TRUE & is.na(SennSlope), "Model did not fit the available data", 
+                                                           ifelse(is.na(Trend), "Insufficient data to calculate trend","No significant trend"))))))
+skt_stats_disc[is.na(Trend), `:=` ("Statistical Trend" = "Insufficient data to calculate trend")]
+
+skt_stats_cont <- skt_stats_cont %>% 
+  mutate("Period of Record" = paste0(EarliestYear, " - ", LatestYear),
+         "Statistical Trend" = ifelse(p <= 0.05 & SennSlope > 0, "Significantly increasing trend",
+                                      ifelse(p <= 0.05 & SennSlope < 0, "Significantly decreasing trend", 
+                                             ifelse(SufficientData==FALSE, "Insufficient data to calculate trend",
+                                                    ifelse(SufficientData==TRUE & is.na(SennSlope), "Model did not fit the available data", 
+                                                           ifelse(is.na(Trend), "Insufficient data to calculate trend","No significant trend"))))))
+skt_stats_cont[is.na(Trend), `:=` ("Statistical Trend" = "Insufficient data to calculate trend")]
+
+# Combine all discrete data into a single output file
+data_output_disc <- setDT(do.call(rbind, lapply(str_subset(disc_files, "data"), readRDS)))
+
+# Post-processing ----
 params <- c()
 for(h in habitats){
   params <- c(params, unique(data_directory[[h]][["overviewTable"]] %>% pull(ParameterName)))
 }
-
+# Create icon associations for valueBoxes
 icon_df <- data.frame(param = params)
 icon_df <- icon_df %>% mutate(icon = ifelse(str_detect(param, "Number|Count"), "hashtag", 
                                             ifelse(str_detect(param, "Percent"), "percent",
@@ -236,26 +313,128 @@ icon_df <- icon_df %>% mutate(icon = ifelse(str_detect(param, "Number|Count"), "
                                                                         ifelse(str_detect(param, "Score"),"star","No")))))))
 setDT(icon_df)
 
-# SAV Figures
-sav_figures <- list.files("figures/sav", 
-                          full.names = TRUE, pattern = ".rds")
+# Function to check for available figures by MA, provides filepath if T, otherwise F 
+fig_detect <- function(figures, ma_short, plot_type) {
+  # Create regex patterns for both possible orders
+  pattern1 <- paste0("(?i)", ma_short, ".*", plot_type)
+  pattern2 <- paste0("(?i)", plot_type, ".*", ma_short)
+  
+  # Detect files matching either pattern
+  matched_files1 <- str_subset(figures, pattern1)
+  matched_files2 <- str_subset(figures, pattern2)
+  
+  # Combine matched files from both patterns
+  matched_files <- c(matched_files1, matched_files2)
+  
+  # Return the first matched file path if any, else return FALSE
+  if (length(matched_files) > 0) {
+    return(matched_files[1])
+  } else {
+    return("FALSE")
+  }
+}
 
+# SAV Figures
+figures <- list.files("www/figures", recursive = T,
+                      full.names = TRUE, pattern = ".png")
+
+# Create associations for filepaths in MA_All
+# Function within Server.R will plot on dashboard using these filepaths
 MA_All <- fread("data/ManagedArea.csv")
-MA_All <- MA_All %>% rowwise() %>% 
-  mutate(multiplot = ifelse(length(str_subset(str_subset(str_subset(sav_figures, "_multiplot"), "_BBpct_"), Abbreviation))>0, 
-                            str_subset(str_subset(str_subset(sav_figures, "_multiplot"), "_BBpct_"), Abbreviation), "FALSE"),
-         trendplot = ifelse(length(str_subset(str_subset(str_subset(sav_figures, "_trendplot"), "_BBpct_"), Abbreviation))>0, 
-                            str_subset(str_subset(str_subset(sav_figures, "_trendplot"), "_BBpct_"), Abbreviation), "FALSE"),
-         barplot = ifelse(length(str_subset(str_subset(sav_figures, "_barplot"), Abbreviation))>0, 
-                          str_subset(str_subset(sav_figures, "_barplot"), Abbreviation), "FALSE"))
+MA_All <- MA_All %>% rowwise() %>% mutate(
+  multiplot = fig_detect(figures, Abbreviation, "multiplot"),
+  trendplot = fig_detect(figures, Abbreviation, "trendplot"),
+  barplot_sp = fig_detect(figures, Abbreviation, "barplot_sp"),
+  Oyster_Dens = fig_detect(figures, Abbreviation, "Oyster_Dens"),
+  Oyster_PrcLive = fig_detect(figures, Abbreviation, "Oyster_PrcLive"),
+  Oyster_SH = fig_detect(figures, Abbreviation, "Oyster_SH"),
+  Nekton_SpeciesRichness = fig_detect(figures, gsub(" ", "", ManagedAreaName), "Nekton_SpeciesRichness"),
+  Coral_pc = fig_detect(figures, gsub(" ", "", ManagedAreaName), "Coral_pc"),
+  Coral_SpeciesRichness = fig_detect(figures, gsub(" ", "", ManagedAreaName), "Coral_SpeciesRichness"),
+  CoastalWetlands_SpeciesRichness = fig_detect(figures, gsub(" ", "", ManagedAreaName), "CoastalWetlands_SpeciesRichness"),
+) %>% ungroup()
 setDT(MA_All)
 
+# plot_type_list <- c("multiplot","trendplot","barplot_sp",
+#                     "Oyster_Dens","Oyster_SH","Oyster_PrcLive",
+#                     "Nekton_SpeciesRichness","Coral_pc","Coral_SpeciesRichness",
+#                     "CoastalWetlands_SpeciesRichness")
 
+# Dataframe to store titles and alt text for figure display
+plot_info <- list(
+  multiplot = list(
+    title = "Median percent cover for ",
+    alt = "Median Percent LME Trends",
+    label = "Multiplot",
+    habitat = "Submerged Aquatic Vegetation"
+  ),
+  barplot_sp = list(
+    title = "Frequency of occurrence for ",
+    alt = "Occurrence frequency by species",
+    label = "Barplot",
+    habitat = "Submerged Aquatic Vegetation"
+  ),
+  trendplot = list(
+    title = "Median percent cover for ",
+    alt = "Median Percent LME Trends",
+    label = "Trendplot",
+    habitat = "Submerged Aquatic Vegetation"
+  ),
+  Oyster_Dens = list(
+    title = "Oyster Density trends for ",
+    alt = "Oyster Density trends",
+    label = "Oyster Density lot",
+    habitat = "Oyster/Oyster Reef"
+  ),
+  Oyster_SH = list(
+    title = "Oyster Size Class trends for ",
+    alt = "Oyster Size Class",
+    label = "Oyster Size Class plot",
+    habitat = "Oyster/Oyster Reef"
+  ),
+  Oyster_PrcLive = list(
+    title = "Oyster Percent Live Cover trends for ",
+    alt = "Oyster Percent Live Cover trends",
+    label = "Oyster Percent Live Cover plot",
+    habitat = "Oyster/Oyster Reef"
+  ),
+  Nekton_SpeciesRichness = list(
+    title = "Nekton Species Richness for ",
+    alt = "Nekton Species Richness",
+    label = "Nekton Species Richness plot",
+    habitat = "Nekton"
+  ),
+  Coral_pc = list(
+    title = "Coral Percent Cover trend for ",
+    alt = "Coral Percent Cover",
+    label = "Coral Percent Cover plot",
+    habitat = "Coral/Coral Reef"
+  ),
+  Coral_SpeciesRichness = list(
+    title = "Grazers and Reef-Dependent Species Richness for ",
+    alt = "Grazers and Reef-Dependent Species Richness",
+    label = "Grazers and Reef-Dependent Species Richness plot",
+    habitat = "Coral/Coral Reef"
+  ),
+  CoastalWetlands_SpeciesRichness = list(
+    title = "Coastal Wetlands Species Richness for ",
+    alt = "Coastal Wetlands Species Richness",
+    label = "Coastal Wetlands Species Richness plot",
+    habitat = "Coastal Wetlands"
+  )
+)
 
+plot_df <- map_df(plot_info, ~as.data.frame(.x), .id = "plot_type")
+setDT(plot_df)
 
-
-
-
+#########################
+# Saving RDS objects ----
+#########################
+rds_to_save <- c("data_directory", "allMapData", "data_output_disc",
+                 "icon_df", "MA_All", "plot_df")
+for(file in rds_to_save){
+  saveRDS(get(file), file=paste0("rds/",file,".rds"))
+}
 
 ### EXPORT SHAPEFILE ###
 # allPoints <- list()
