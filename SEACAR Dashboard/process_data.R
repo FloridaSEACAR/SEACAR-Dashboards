@@ -61,8 +61,8 @@ nekton <- fread(str_subset(files, "NEKTON"), sep='|', na.strings = "NULL")
 nekton <- nekton[Include == 1 & MADup==1, ]
 
 # Create named habitats list to populate selections
-habitats <- c("sav" = "Submerged Aquatic Vegetation", "oyster" = "Oyster/Oyster Reef", 
-              "coral" = "Coral/Coral Reef", "cw" = "Coastal Wetlands", "nekton" = "Nekton")
+habitats <- c("sav" = "Submerged Aquatic Vegetation", "oyster" = "Oyster Reef", 
+              "coral" = "Coral Reef", "cw" = "Coastal Wetlands", "nekton" = "Nekton")
 
 # Function to find gaps in years by program (Gantt timeline)
 find_gaps <- function(years) {
@@ -104,7 +104,11 @@ for(h in names(habitats)){
   habitat <- habitats[[h]]
   
   # DB_Thresholds file lists habitat as Water Column, make exception for Nekton
-  hab_subset <- ifelse(habitat=="Nekton", "Water Column", habitat)
+  # Convert "Oyster" back to "Oyster/Oyster Reef" format to match db_thresholds Habitat format, same for Coral
+  hab_subset <- ifelse(habitat=="Nekton", "Water Column", 
+                       ifelse(habitat %in% c("Oyster Reef","Coral Reef"), 
+                              paste0(str_split_1(habitat, " ")[1],"/",habitat), 
+                              habitat))
   
   # Merge in Units from db_thresholds
   data <- merge(data, db_thresholds[Habitat==hab_subset], 
@@ -192,7 +196,8 @@ for(h in names(habitats)){
               .groups = "keep") %>%
     arrange(ProgramID)
   
-  data_directory[[habitat]][["maSummTable"]] <- data %>% 
+  data_directory[[habitat]][["maSummTable"]] <- data %>%
+    filter(!is.na(ManagedAreaName)) %>%
     group_by(ParameterName, Units, ManagedAreaName) %>%
     summarise(N_samples = n(), mean = round(mean(ResultValue),2),
               min = min(ResultValue), max = max(ResultValue),
@@ -383,20 +388,20 @@ plot_info <- list(
   Oyster_Dens = list(
     title = "Oyster Density trends for ",
     alt = "Oyster Density trends",
-    label = "Oyster Density lot",
-    habitat = "Oyster/Oyster Reef"
+    label = "Oyster Density plot",
+    habitat = "Oyster Reef"
   ),
   Oyster_SH = list(
     title = "Oyster Size Class trends for ",
     alt = "Oyster Size Class",
     label = "Oyster Size Class plot",
-    habitat = "Oyster/Oyster Reef"
+    habitat = "Oyster Reef"
   ),
   Oyster_PrcLive = list(
     title = "Oyster Percent Live Cover trends for ",
     alt = "Oyster Percent Live Cover trends",
     label = "Oyster Percent Live Cover plot",
-    habitat = "Oyster/Oyster Reef"
+    habitat = "Oyster Reef"
   ),
   Nekton_SpeciesRichness = list(
     title = "Nekton Species Richness for ",
@@ -408,13 +413,13 @@ plot_info <- list(
     title = "Coral Percent Cover trend for ",
     alt = "Coral Percent Cover",
     label = "Coral Percent Cover plot",
-    habitat = "Coral/Coral Reef"
+    habitat = "Coral Reef"
   ),
   Coral_SpeciesRichness = list(
     title = "Grazers and Reef-Dependent Species Richness for ",
     alt = "Grazers and Reef-Dependent Species Richness",
     label = "Grazers and Reef-Dependent Species Richness plot",
-    habitat = "Coral/Coral Reef"
+    habitat = "Coral Reef"
   ),
   CoastalWetlands_SpeciesRichness = list(
     title = "Coastal Wetlands Species Richness for ",

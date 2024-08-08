@@ -51,36 +51,35 @@ habitatPage <-
     ),
     fluidRow(
       tabsetPanel(
-        tabPanel("By Managed Area",
-                 column(4,
-                        wellPanel(
-                          selectizeInput(inputId = "maSelect",
-                                         label = "Select a Managed Area",
-                                         choices = "Select a Managed Area"),
-                          textOutput("managedAreaInfo"),
-                          tableOutput("maSummTable"),
-                          div(tags$b("SEACAR ProgramID - ProgramName")),
-                          uiOutput("maPrograms")
-                          # uiOutput("plotLinks")
-                        )),
-                 column(2,
-                        uiOutput("plotLinks")),
-                 column(6,
-                        DT::DTOutput("maOverviewTable"))),      
-        tabPanel("By Program",
-                 column(5,
-                        wellPanel(
-                          selectizeInput(inputId = "programSelect",
-                                         label = "Select a Program",
-                                         choices = "Select a Program",
-                                         selected = "All"),
-                          textOutput("programInfo"),
-                          tableOutput("summTable"),
-                          div(tags$b("Office of Resilience and Coastal Protection Managed Areas")),
-                          textOutput("programMAs")
-                        )),
-                 column(7,
-                        DT::DTOutput("programOverviewTable"))
+        tabPanel(
+          "By Managed Area",
+          column(4,
+                 wellPanel(
+                   selectizeInput(inputId = "maSelect",
+                                   label = "Select a Managed Area",
+                                   choices = "Select a Managed Area"),
+                   textOutput("managedAreaInfo"),
+                   tableOutput("maSummTable"),
+                   uiOutput("maPrograms")
+                  )),
+          column(2,
+                 uiOutput("plotLinks")),
+          column(6,
+                 DT::DTOutput("maOverviewTable"))),      
+        tabPanel(
+          "By Program",
+           column(5,
+                  wellPanel(
+                    selectizeInput(inputId = "programSelect",
+                                   label = "Select a Program",
+                                   choices = "Select a Program",
+                                   selected = "All"),
+                    textOutput("programInfo"),
+                    tableOutput("summTable"),
+                    uiOutput("programMAs")
+                  )),
+           column(7,
+                  DT::DTOutput("programOverviewTable"))
         )
       )
     )
@@ -108,19 +107,22 @@ wqDiscretePage <-
   )
 
 # Shiny UI ----
-ui <- navbarPage("SEACAR Dashboard",
-                 tabPanel("Overview",
-                          dashboardPage(header, sidebar, splashPage)),
-                 tabPanel("Habitats",
-                          fluidPage(dashboardPage(header, sidebar, habitatPage))),
-                 navbarMenu("Water Quality / Clarity / Nutrients",
-                            tabPanel("Discrete WQ",
-                                     fluidPage(dashboardPage(header, sidebar, wqDiscretePage))),
-                            tabPanel("Continuous WQ")
-                          ),
-                 nav_spacer(),
-                 nav_item(
-                   tags$a(icon("github"), " SEACAR GitHub", href="https://github.com/FloridaSEACAR/", target="_blank")
-                 ),
-                 footer = funding()
-                 )
+ui <- navbarPage(
+  "SEACAR Dashboard",
+  tabPanel("Overview",
+           dashboardPage(header, sidebar, splashPage)),
+  tabPanel("Habitats",
+           fluidPage(
+             tags$head(
+               tags$link(rel = "stylesheet", type = "text/css", href = "www/style.css")
+             ),
+             dashboardPage(header, sidebar, habitatPage))),
+  navbarMenu("Water Quality / Clarity / Nutrients",
+             tabPanel("Discrete WQ",
+                      fluidPage(dashboardPage(header, sidebar, wqDiscretePage))),
+             tabPanel("Continuous WQ")),
+  nav_spacer(),
+  nav_item(
+    tags$a(icon("github"), " SEACAR GitHub", href="https://github.com/FloridaSEACAR/", target="_blank")),
+  footer = funding()
+)

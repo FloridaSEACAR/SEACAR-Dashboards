@@ -1,11 +1,12 @@
 showPlot <- function(type, ma, ma_short, h){
   src <- MA_All[Abbreviation==ma_short, get(type)]
   hab_plot_types <- plot_df[habitat==h, unique(plot_type)]
+  title <- paste0(plot_df[plot_type==type, title], ma)
   
   if (type %in% hab_plot_types) {
     showModal(
       modalDialog(
-        title = plot_df[plot_type==type, title],
+        title = title,
         tags$div(
           tags$img(
             src = src,
@@ -13,14 +14,15 @@ showPlot <- function(type, ma, ma_short, h){
             height = "100%",
             width = "100%"
           ),
+          tags$p("Table caption text / trend results table here"),
           style = "text-align:center;"
         ),
-        size = "m"
+        size = "m",
+        easyClose = T
       )
     )
   }
 }
-
 
 # Shiny Server ----
 server <- function(input, output, session){
@@ -70,7 +72,8 @@ server <- function(input, output, session){
   output$pieChart <- renderBillboarder(
     billboarder() %>% 
       bb_piechart(pieData) %>% 
-      bb_pie(label = list(format = htmlwidgets::JS("function(value) {return (value);}"))) %>%
+      bb_pie(label = list(format = htmlwidgets::JS("function(value) {return (value);}"),
+                          threshold = 0.01)) %>%
       bb_tooltip(format = list(
         name = htmlwidgets::JS("function(name, ratio, id, index) {return 'Number of programs';}"),
         value = htmlwidgets::JS("d3.format(',')")
@@ -102,7 +105,8 @@ server <- function(input, output, session){
   
   output$maOverviewTable <- DT::renderDT({
     
-    data <- setDT(displayOverviewTable(habitat(), ma(), type="ma"))
+    data <- setDT(displayOverviewTable(habitat(), ma(), type="ma") %>% 
+                    filter(!is.na(ManagedAreaName)))
     
     if(!ma()=="All"){data <- data[, -c("ManagedAreaName")]}
     
@@ -111,22 +115,32 @@ server <- function(input, output, session){
     )
   })
   
-  output$programInfo <- renderText({pid()})
+  output$programInfo <- renderText({if(!pid()=="All"){pid()}})
   
-  output$managedAreaInfo <- renderText({ma()})
+  output$managedAreaInfo <- renderText({if(!ma()=="All"){ma()}})
   
   output$maPrograms <- renderUI({
-    paste(data_directory[[habitat()]][["MAPrograms"]] %>% 
-            filter(ManagedAreaName==ma()) %>%
-            mutate(pNameID = paste0(ProgramID, " - ", ProgramName)) %>% 
-            pull(pNameID), 
-          collapse=", ")
+    if(!ma()=="All"){
+      progs <- data_directory[[habitat()]][["MAPrograms"]] %>% 
+        filter(ManagedAreaName==ma()) %>%
+        mutate(pNameID = paste0(ProgramID, " - ", ProgramName)) %>%
+        # mutate(link = paste0("tags$a(href='https://data.florida-seacar.org/programs/details/",ProgramID,"'",",",pNameID,")")) %>%
+        pull(pNameID)
+      div(tags$b("SEACAR ProgramID - ProgramName"), 
+          tags$br(),
+          tagList(tags$ul(purrr::map(progs, function(.x) tags$li(.x)))))
+    }
   })
   
-  output$programMAs <- renderText({
-    paste(unique(data_directory[[habitat()]][["MAPrograms"]] %>% 
-             filter(ProgramName==pid()) %>%
-             pull(ManagedAreaName)), collapse=", ")
+  output$programMAs <- renderUI({
+    if(!pid()=="All"){
+      div(tags$b("Office of Resilience and Coastal Protection Managed Areas"), tags$br(),
+          paste(unique(data_directory[[habitat()]][["MAPrograms"]] %>% 
+                         filter(ProgramName==pid()) %>%
+                         pull(ManagedAreaName)),
+          collapse=", "))
+    }
+
   })
   
   output$habitatDescription <- renderUI({
@@ -140,7 +154,7 @@ server <- function(input, output, session){
     lapply(1:nrow(params), function(i){
       valueBox(value = paste0(params[i, "n"]),
                subtitle = params[i, "ParameterName"],
-               width = 4, icon = icon(icon_df[param==params[i, 1], unique(icon)]))
+               width = 4)
     })
   })
   
@@ -154,9 +168,9 @@ server <- function(input, output, session){
         lapply(hab_plot_types, function(plot) {
           plot_check <- MA_All[ManagedAreaName == ma(), get(plot)]
           if (plot_check != "FALSE") {
-            actionLink(paste0(ma_short, "__", plot),
-                       label = plot_df[plot_type==plot, label],
-                       onclick = 'Shiny.onInputChange("select_button", this.id);')
+            actionButton(paste0(ma_short, "__", plot),
+                         label = plot_df[plot_type==plot, label],
+                         onclick = 'Shiny.onInputChange("select_button", this.id);')
           }
         })
       
