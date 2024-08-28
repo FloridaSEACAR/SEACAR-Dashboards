@@ -129,7 +129,9 @@ for(h in names(habitats)){
   
   ### ProgramIDs for each ManagedArea
   data_directory[[habitat]][["MAPrograms"]] <- data %>% 
-    group_by(ProgramID, ProgramName, ManagedAreaName) %>% summarise()
+    group_by(ProgramID, ProgramName, ManagedAreaName) %>% summarise() %>%
+    mutate(pNameID = paste0(ProgramID, " - ", ProgramName)) %>%
+    mutate(link = paste0("tags$a(href='https://data.florida-seacar.org/programs/details/",ProgramID,"'",",",pNameID,")"))
   
   ### ProgramYearsPlots
   programYears <- data %>%
@@ -304,19 +306,20 @@ skt_stats_cont[is.na(Trend), `:=` ("Statistical Trend" = "Insufficient data to c
 data_output_disc <- setDT(do.call(rbind, lapply(str_subset(disc_files, "data"), readRDS)))
 
 # Post-processing ----
-params <- c()
-for(h in habitats){
-  params <- c(params, unique(data_directory[[h]][["overviewTable"]] %>% pull(ParameterName)))
-}
-# Create icon associations for valueBoxes
-icon_df <- data.frame(param = params)
-icon_df <- icon_df %>% mutate(icon = ifelse(str_detect(param, "Number|Count"), "hashtag", 
-                                            ifelse(str_detect(param, "Percent"), "percent",
-                                                   ifelse(str_detect(param, "Height|Length|Width|Diameter"), "ruler", 
-                                                          ifelse(str_detect(param, "Presence"), "check", 
-                                                                 ifelse(str_detect(param, "Density"), "fish",
-                                                                        ifelse(str_detect(param, "Score"),"star","No")))))))
-setDT(icon_df)
+# The following sets up Icon designations for valueBoxes
+# params <- c()
+# for(h in habitats){
+#   params <- c(params, unique(data_directory[[h]][["overviewTable"]] %>% pull(ParameterName)))
+# }
+# # Create icon associations for valueBoxes
+# icon_df <- data.frame(param = params)
+# icon_df <- icon_df %>% mutate(icon = ifelse(str_detect(param, "Number|Count"), "hashtag", 
+#                                             ifelse(str_detect(param, "Percent"), "percent",
+#                                                    ifelse(str_detect(param, "Height|Length|Width|Diameter"), "ruler", 
+#                                                           ifelse(str_detect(param, "Presence"), "check", 
+#                                                                  ifelse(str_detect(param, "Density"), "fish",
+#                                                                         ifelse(str_detect(param, "Score"),"star","No")))))))
+# setDT(icon_df)
 
 # Function to check for available figures by MA, provides filepath if T, otherwise F 
 fig_detect <- function(figures, ma_short, plot_type) {
@@ -370,73 +373,114 @@ plot_info <- list(
   multiplot = list(
     title = "Median percent cover for ",
     alt = "Median Percent LME Trends",
-    label = "Multiplot",
+    label = "Median percent cover",
     habitat = "Submerged Aquatic Vegetation"
   ),
   barplot_sp = list(
     title = "Frequency of occurrence for ",
     alt = "Occurrence frequency by species",
-    label = "Barplot",
+    label = "Frequency of occurrence",
     habitat = "Submerged Aquatic Vegetation"
   ),
   trendplot = list(
     title = "Median percent cover for ",
     alt = "Median Percent LME Trends",
-    label = "Trendplot",
+    label = "Median percent cover trends",
     habitat = "Submerged Aquatic Vegetation"
   ),
   Oyster_Dens = list(
     title = "Oyster Density trends for ",
     alt = "Oyster Density trends",
-    label = "Oyster Density plot",
+    label = "Oyster Density",
     habitat = "Oyster Reef"
   ),
   Oyster_SH = list(
     title = "Oyster Size Class trends for ",
     alt = "Oyster Size Class",
-    label = "Oyster Size Class plot",
+    label = "Oyster Size Class",
     habitat = "Oyster Reef"
   ),
   Oyster_PrcLive = list(
     title = "Oyster Percent Live Cover trends for ",
     alt = "Oyster Percent Live Cover trends",
-    label = "Oyster Percent Live Cover plot",
+    label = "Oyster Percent Live Cover",
     habitat = "Oyster Reef"
   ),
   Nekton_SpeciesRichness = list(
     title = "Nekton Species Richness for ",
     alt = "Nekton Species Richness",
-    label = "Nekton Species Richness plot",
+    label = "Nekton Species Richness",
     habitat = "Nekton"
   ),
   Coral_pc = list(
     title = "Coral Percent Cover trend for ",
     alt = "Coral Percent Cover",
-    label = "Coral Percent Cover plot",
+    label = "Coral Percent Cover",
     habitat = "Coral Reef"
   ),
   Coral_SpeciesRichness = list(
     title = "Grazers and Reef-Dependent Species Richness for ",
     alt = "Grazers and Reef-Dependent Species Richness",
-    label = "Grazers and Reef-Dependent Species Richness plot",
+    label = "Grazers and Reef-Dependent Species Richness",
     habitat = "Coral Reef"
   ),
   CoastalWetlands_SpeciesRichness = list(
     title = "Coastal Wetlands Species Richness for ",
     alt = "Coastal Wetlands Species Richness",
-    label = "Coastal Wetlands Species Richness plot",
+    label = "Coastal Wetlands Species Richness",
     habitat = "Coastal Wetlands"
   )
 )
 
-plot_df <- map_df(plot_info, ~as.data.frame(.x), .id = "plot_type")
+plot_df <- map(plot_info, ~as.data.frame(.x), .id = "plot_type")
 setDT(plot_df)
+
+# Incorporate trend tables for each habitat
+## SAV
+sav_trends <- fread("data/SAV_BBpct_LMEresults_All.txt", sep='|')
+sav_trends[, `:=` ("Period of Record" = paste0(EarliestYear, " - ", LatestYear))]
+sav_trends <- sav_trends[, c("ManagedAreaName","Species","StatisticalTrend",
+                             "Period of Record","LME_Intercept","LME_Slope","p")]
+## Oyster
+# Function pulled from CheckTrendText.R from QAQC-Tools repo
+checkOysterTrends <- function(modelEstimate, lowConfidence, upConfidence, suffData){
+  if(is.na(modelEstimate)){
+    if(suffData){
+      trendStatus <- "Model did not fit the available data"
+    } else {
+      trendStatus <- "Insufficient data to calculate trend"
+    }
+  } else {
+    increasing <- modelEstimate > 0
+    trendPresent <- ifelse(lowConfidence < 0 & upConfidence < 0, TRUE, 
+                           ifelse(lowConfidence > 0 & upConfidence > 0, TRUE, FALSE))
+    trendStatus <- "No significant trend"
+    if(trendPresent){
+      trendStatus <- ifelse(increasing, "Significantly increasing trend", "Significantly decreasing trend")
+    }    
+  }
+  return(trendStatus)
+}
+
+oy_trends <- fread("data/Oyster_All_GLMM_Stats.txt", sep='|')
+oy_trends <- oy_trends %>% rowwise() %>% 
+  mutate(TrendStatus = checkOysterTrends(ModelEstimate, LowerConfidence, UpperConfidence, SufficientData)) %>% ungroup() %>%
+  mutate(CredibleInterval = paste0(round(LowerConfidence,2), " to ", round(UpperConfidence,2))) %>%
+  select(ManagedAreaName, ParameterName, ShellType, HabitatType, SizeClass, TrendStatus, ModelEstimate, 
+         StandardError, CredibleInterval)
+setDT(oy_trends)
+
+# Overall TrendTable object
+allTrendTables <- list(
+  "Submerged Aquatic Vegetation" = sav_trends,
+  "Oyster Reef" = oy_trends
+)
 
 #########################
 # Saving RDS objects ----
 #########################
-rds_to_save <- c("data_directory", "allMapData", "data_output_disc",
-                 "icon_df", "MA_All", "plot_df")
+rds_to_save <- c("data_directory", "allMapData", "data_output_disc", "MA_All", 
+                 "plot_df", "publish_date", "sav_trends")
 for(file in rds_to_save){
   saveRDS(get(file), file=paste0("rds/",file,".rds"))
 }

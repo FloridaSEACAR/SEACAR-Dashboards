@@ -1,3 +1,11 @@
+li {
+  list-style-type: none;
+}
+
+ul {
+  padding-left: 0;
+}
+
 .bg-aqua {
   background-color: #2E5270 !important;
 }

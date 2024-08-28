@@ -1,3 +1,4 @@
+publish_date <- readRDS("rds/publish_date.rds")
 # Text to declare funding
 funding_text <- paste(
   tags$div("Funding Acknowledgement", style="text-align:center; font-weight:bold;"),

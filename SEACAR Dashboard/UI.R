@@ -1,4 +1,12 @@
 library(bslib)
+library(shinydashboard)
+library(billboarder)
+library(leaflet)
+
+source("UI_Snippets.R")
+
+habitats <- c("sav" = "Submerged Aquatic Vegetation", "oyster" = "Oyster Reef",
+              "coral" = "Coral Reef", "cw" = "Coastal Wetlands", "nekton" = "Nekton")
 
 # Enables recognition of images folder
 addResourcePath(prefix="www", directoryPath = "www")
@@ -58,7 +66,7 @@ habitatPage <-
                    selectizeInput(inputId = "maSelect",
                                    label = "Select a Managed Area",
                                    choices = "Select a Managed Area"),
-                   textOutput("managedAreaInfo"),
+                   uiOutput("managedAreaInfo"),
                    tableOutput("maSummTable"),
                    uiOutput("maPrograms")
                   )),
@@ -74,7 +82,7 @@ habitatPage <-
                                    label = "Select a Program",
                                    choices = "Select a Program",
                                    selected = "All"),
-                    textOutput("programInfo"),
+                    uiOutput("programInfo"),
                     tableOutput("summTable"),
                     uiOutput("programMAs")
                   )),
@@ -89,21 +97,21 @@ wqDiscretePage <-
   dashboardBody(
     # useShinyjs(),
     # shinyjs::hidden(),
-    fluidRow(
-      selectInput(inputId = "paramSelect",
-                  label = "Select Parameter to view",
-                  choices = unique(grouped_df$ParameterName),
-                  selected = "Dissolved Oxygen")
-    ),
-    fluidRow(
-      column(5,
-             plotOutput("discreteProgramPlot"),
-             tableOutput("discretePrograms")
-             ),
-      column(7,
-             # leafletOutput("discreteMap")
-             )
-    ),
+    # fluidRow(
+    #   selectInput(inputId = "paramSelect",
+    #               label = "Select Parameter to view",
+    #               choices = unique(grouped_df$ParameterName),
+    #               selected = "Dissolved Oxygen")
+    # ),
+    # fluidRow(
+    #   column(5,
+    #          plotOutput("discreteProgramPlot"),
+    #          tableOutput("discretePrograms")
+    #          ),
+    #   column(7,
+    #          # leafletOutput("discreteMap")
+    #          )
+    # ),
   )
 
 # Shiny UI ----
