@@ -458,13 +458,8 @@ ui <- fluidPage(
                                 selected = c("Active","Historical")),
              shinyjs::hidden(
                textOutput("activeSelectText"))
-<<<<<<< HEAD
            )
            
-=======
-             )
-             
->>>>>>> a1f5d09d76d03d5b6de0a2b83112a4cb2239b1fb
     ),
     column(8,
            shinyjs::hidden(
@@ -567,7 +562,6 @@ server <- function(input, output, session){
     HTML(funding_text)
   })
   
-<<<<<<< HEAD
   activeChoices <- reactive({
     unique(display_table(e(), activeStatus=c("Active","Historical"))$Status)
   })
@@ -580,8 +574,6 @@ server <- function(input, output, session){
                              selected = activeChoices())
   })
   
-=======
->>>>>>> a1f5d09d76d03d5b6de0a2b83112a4cb2239b1fb
   output$activeSelectText <- renderText(active())
   
   observe({
@@ -610,11 +602,7 @@ server <- function(input, output, session){
       }
 
       shinyjs::hideElement(id="hide_text")
-<<<<<<< HEAD
       shinyjs::showElement(id="activeSelect")
-=======
-      shinyjs::hideElement(id="activeSelect")
->>>>>>> a1f5d09d76d03d5b6de0a2b83112a4cb2239b1fb
     } else {
       
       active_groups <- character()
