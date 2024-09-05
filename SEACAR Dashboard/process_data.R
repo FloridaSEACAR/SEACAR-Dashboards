@@ -13,6 +13,7 @@ library(lubridate)
 library(sf)
 library(xlsx)
 library(tidyr)
+library(purrr)
 
 wd <- dirname(getActiveDocumentContext()$path)
 setwd(wd)
@@ -232,17 +233,13 @@ for(h in names(habitats)){
 #   select(-c(Mgmt_Unit, Acres, OBJECTID_1)) %>% st_transform('+proj=longlat +datum=WGS84')
 
 ### Discrete Water Quality data wrangling ----
-# Makes use of discrete data object outputs from MA Report Generation
-# Change folder date to select which objects to load (to match Atlas)
-disc_folder_date <- "2024-Mar-27"
-cont_folder_date <- "2024-Mar-27"
-
 # Point to location where Disc objects are located
 data_obj_loc <- "C:/Users/Hill_T/Desktop/SEACAR GitHub/SEACAR_Trend_Analyses/MA Report Generation/output/tables/"
 
+# Makes use of discrete data object outputs from MA Report Generation
 # Lists of disc and cont .rds objects to read
-disc_files <- list.files(paste0(data_obj_loc,"disc/",disc_folder_date,"/"),pattern = "\\.rds$", full.names = T)
-cont_files <- list.files(paste0(data_obj_loc,"cont/",cont_folder_date,"/"),pattern = "\\.rds$", full.names = T)
+disc_files <- list.files(paste0(data_obj_loc,"disc/"),pattern = "\\.rds$", full.names = T)
+cont_files <- list.files(paste0(data_obj_loc,"cont/"),pattern = "\\.rds$", full.names = T)
 
 # function of parameter, activity type, depth, with specified filetype
 # retrieves RDS filepath to be loaded
@@ -432,8 +429,7 @@ plot_info <- list(
   )
 )
 
-plot_df <- map(plot_info, ~as.data.frame(.x), .id = "plot_type")
-setDT(plot_df)
+plot_df <- setDT(map_df(plot_info, ~as.data.frame(.x), .id = "plot_type"))
 
 # Incorporate trend tables for each habitat
 ## SAV
