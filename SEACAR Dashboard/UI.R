@@ -2,6 +2,7 @@ library(bslib)
 library(shinydashboard)
 library(billboarder)
 library(leaflet)
+library(shinyjs)
 
 source("UI_Snippets.R")
 
@@ -35,7 +36,7 @@ splashPage <- dashboardBody(
 
 habitatPage <-
   dashboardBody(
-    # useShinyjs(),
+    useShinyjs(),
     # shinyjs::hidden(),
     fluidRow(
       column(4,
@@ -55,7 +56,14 @@ habitatPage <-
              splitLayout(uiOutput("programBoxes"))
              ),
       column(4,
-             leafletOutput("leafletMap"))
+             leafletOutput("leafletMap"),
+             div(style = "max-width:fit-content;",
+                 shinyjs::hidden(checkboxInput("CHIMMP_checkbox",
+                                               label = "Toggle CHIMMP boundaries", 
+                                               value = FALSE)),
+                 shinyjs::hidden(checkboxInput("OIMMP_checkbox",
+                                               label = "Toggle OIMMP boundaries", 
+                                               value = FALSE))))
     ),
     fluidRow(
       tabsetPanel(
@@ -125,10 +133,10 @@ ui <- navbarPage(
                tags$link(rel = "stylesheet", type = "text/css", href = "www/style.css")
              ),
              dashboardPage(header, sidebar, habitatPage))),
-  navbarMenu("Water Quality / Clarity / Nutrients",
-             tabPanel("Discrete WQ",
-                      fluidPage(dashboardPage(header, sidebar, wqDiscretePage))),
-             tabPanel("Continuous WQ")),
+  # navbarMenu("Water Quality / Clarity / Nutrients",
+  #            tabPanel("Discrete WQ",
+  #                     fluidPage(dashboardPage(header, sidebar, wqDiscretePage))),
+  #            tabPanel("Continuous WQ")),
   nav_spacer(),
   nav_item(
     tags$a(icon("github"), " SEACAR GitHub", href="https://github.com/FloridaSEACAR/", target="_blank")),

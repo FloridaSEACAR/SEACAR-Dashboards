@@ -5,6 +5,7 @@ library(stringr)
 library(ggplot2)
 library(DT)
 library(purrr)
+library(sf)
 
 # Functions ----
 # returns number of programs for each parameter
@@ -157,14 +158,10 @@ seacar_sp_palette <- c("#005396","#0088B1","#00ADAE","#65CCB3","#AEE4C1",
 
 
 rds_to_load <- c("data_directory", "allMapData", "MA_All", "plot_df",
-                 "publish_date", "sav_trends")
+                 "publish_date", "sav_trends","oimmp", "chimmp")
 for(file in rds_to_load){
   eval(call("<-", as.name(file), readRDS(paste0("rds/",file,".rds"))))
 }
-
-# Show SE Region only?
-se_region <- MA_All[Region=="SE", unique(ManagedAreaName)]
-allMapData <- allMapData[ManagedAreaName %in% se_region, ]
 
 # Mapping ----
 # create map objects at start to make maps more efficiently within dashboard
@@ -202,17 +199,43 @@ for(h in habitats){
       opacity = 0.4)
 }
 
+# Add OIMMP and CHIMMP boundaries
+# Create palette to display boundaries
+oimmp_pal <- colorFactor("Set3", oimmp$Region)
+chimmp_pal <- colorFactor("Paired", chimmp$Region)
+
+map <- map %>%
+  addMapPane("background", zIndex = 400) %>%
+  addMapPane("foreground", zIndex = 500) %>%
+  addPolygons(data=oimmp, color = "#F0F0F0", weight = 1, smoothFactor = 0.5, 
+              opacity = 1.0, fillOpacity = 0.4, fillColor = ~oimmp_pal(Region), 
+              group="OIMMP Boundary", options = pathOptions(pane = "background")) %>%
+  addPolygons(data=chimmp, color = "#F0F0F0", weight = 1, smoothFactor = 0.5, 
+              opacity = 1.0, fillOpacity = 0.4, fillColor = ~chimmp_pal(Region), 
+              group="CHIMMP Boundary", options = pathOptions(pane = "background"))
+
 # Add map layer controls (for testing)
 map <- map %>%
-  addLayersControl(overlayGroups = unname(habitats),
+  addLayersControl(overlayGroups = c(unname(habitats), "OIMMP Boundary", "CHIMMP Boundary"),
                    options = layersControlOptions(collapsed=TRUE))
 
 # Shiny Server ----
 server <- function(input, output, session){
   plot_type <- reactiveVal()
-  
+  # Habitat selection change
   observeEvent(input$habitatSelect, {
     habitat <- input$habitatSelect
+    # Show or hide toggle box for OIMMP and CHIMMP boundaries
+    if(!habitat %in% c("Oyster Reef", "Coastal Wetlands")){
+      shinyjs::hideElement("OIMMP_checkbox")
+      shinyjs::hideElement("CHIMMP_checkbox")
+    } else if(habitat=="Oyster Reef"){
+      shinyjs::showElement("OIMMP_checkbox")
+      shinyjs::hideElement("CHIMMP_checkbox")
+    } else if(habitat=="Coastal Wetlands"){
+      shinyjs::showElement("CHIMMP_checkbox")
+      shinyjs::hideElement("OIMMP_checkbox")
+    }
     
     leafletProxy("leafletMap") %>%
       showGroup(habitat) %>%
@@ -227,6 +250,28 @@ server <- function(input, output, session){
     
     updateSelectizeInput(inputId = "maSelect",
                          choices = c("All",unique(data_directory[[input$habitatSelect]][["maSummTable"]]$ManagedAreaName)))
+  })
+  
+  # OIMMP Boundary check box
+  observeEvent(input$OIMMP_checkbox,{
+    if(input$OIMMP_checkbox){
+      leafletProxy("leafletMap") %>%
+        showGroup("OIMMP Boundary")
+    } else {
+      leafletProxy("leafletMap") %>%
+        hideGroup("OIMMP Boundary")
+    }
+  })
+  
+  # CHIMMP Boundary check box
+  observeEvent(input$CHIMMP_checkbox,{
+    if(input$CHIMMP_checkbox){
+      leafletProxy("leafletMap") %>%
+        showGroup("CHIMMP Boundary")
+    } else {
+      leafletProxy("leafletMap") %>%
+        hideGroup("CHIMMP Boundary")
+    }
   })
   
   observeEvent(input$habitatCheckBox, {
@@ -270,7 +315,8 @@ server <- function(input, output, session){
   output$leafletMap <- renderLeaflet(
     map %>% 
       showGroup("Submerged Aquatic Vegetation") %>% 
-      hideGroup(unname(habitats[!habitats %in% "Submerged Aquatic Vegetation"]))
+      hideGroup(c(unname(habitats[!habitats %in% "Submerged Aquatic Vegetation"]),
+                  "OIMMP Boundary", "CHIMMP Boundary"))
   )
   
   output$allMap <- renderLeaflet(allMap %>% hideGroup(unname(habitats)))

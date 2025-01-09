@@ -1,6 +1,5 @@
 # This script pre-processes combined tables and creates the necessary .RDS modules
 # for more efficient use in app.R.
-
 library(shiny)
 library(dplyr)
 library(leaflet)
@@ -178,7 +177,7 @@ for(h in names(habitats)){
                          "<br> params: ", params),
            label = paste0(ProgramID, ": ", ProgramName, 
                           " - LocID: ", LocationID)) %>%
-    select(-c(ObjectID,DateAdded,LastModifi,LastModi_1,geometry)) %>%
+    select(-c(DateAdded,LastModifi,LastModi_1,geometry)) %>% #ObjectID not available in latest SampleLocations shapefile? (9sep2024) Deselect here if it returns
     rename(lat = Latitude_D, lon = Longitude_) %>%
     mutate(habitat = habitat,
            rad = sqrt(n_data)/8)
@@ -227,6 +226,7 @@ for(h in names(habitats)){
   rm(programYears, programs, ma_data, df)
 }
 
+setDT(allMapData)
 # # Import RCP shapefile to pre-process and increase efficiency
 # shape_file <- list.files(paste0(seacar_shape_location, "/orcp_all_sites"), pattern = ".shp$", full.names=T)
 # rcp <- st_read(shape_file) %>% filter(LONG_NAME %in% unique(MA_Include)) %>% 
@@ -234,7 +234,7 @@ for(h in names(habitats)){
 
 ### Discrete Water Quality data wrangling ----
 # Point to location where Disc objects are located
-data_obj_loc <- "C:/Users/Hill_T/Desktop/SEACAR GitHub/SEACAR_Trend_Analyses/MA Report Generation/output/tables/"
+data_obj_loc <- "../../SEACAR_Trend_Analyses/WQ_Cont_Discrete/output/tables/"
 
 # Makes use of discrete data object outputs from MA Report Generation
 # Lists of disc and cont .rds objects to read
@@ -303,7 +303,7 @@ skt_stats_cont[is.na(Trend), `:=` ("Statistical Trend" = "Insufficient data to c
 data_output_disc <- setDT(do.call(rbind, lapply(str_subset(disc_files, "data"), readRDS)))
 
 # Post-processing ----
-# The following sets up Icon designations for valueBoxes
+# The following sets up Icon designations for valueBoxes (currently unused)
 # params <- c()
 # for(h in habitats){
 #   params <- c(params, unique(data_directory[[h]][["overviewTable"]] %>% pull(ParameterName)))
@@ -339,6 +339,54 @@ fig_detect <- function(figures, ma_short, plot_type) {
   }
 }
 
+### COPY FIGURES ###
+# This code locates the necessary .png and .txt outputs from each habitat in
+# SEACAR_Trend_Analyses and copies them into the dashboard folder www/figures
+# This prevents the need to copy the figures manually
+dash_fig_loc <- "www/figures/"
+dash_fig_folders <- c("CoastalWetlandsFigures/","CoralPCFigures/","CoralSpeciesRichnessFigures/",
+                      "NektonFigures/", "OysterDensityFigures/", "OysterPercentLiveFigures/",
+                      "OysterShellHeightFigures/", "SAVFigures_common/")
+original_fig_loc <- "../../SEACAR_Trend_Analyses/"
+original_fig_folders <- c("Coastal_Wetlands/output/Figures/", "Coral/output/PercentCover/Figures/", "Coral/output/SpeciesRichness/Figures/",
+                          "Nekton/output/Figures/", "Oyster/output/Density/Figures/", "Oyster/output/Percent_Live/Figures/", 
+                          "Oyster/output/Shell_Height/Figures/", "SAV/output/website/images/")
+
+fig_crosswalk <- data.table(
+  "dash_figs" = paste0(dash_fig_loc, dash_fig_folders),
+  "original_figs" = paste0(original_fig_loc, original_fig_folders)
+)
+
+data_loc <- "data/"
+data_files <- c("CoastalWetlands_SpeciesRichness_MA_Overall_Stats",
+                "Coral_PC_LME_Stats", "Nekton_SpeciesRichness_MA_Overall_Stats",
+                "Oyster_All_GLMM_Stats", "SAV_BBpct_LMEresults_All")
+original_data_loc <- c("Coastal_Wetlands/output/",
+                       "Coral/output/PercentCover/", "Nekton/output/",
+                       "Oyster/output/", "SAV/output/website/")
+
+copy_files <- function(from, to) {
+  # Ensure the full directory exists, not just the parent directory
+  if (!dir.exists(to)) {
+    dir.create(to, recursive = TRUE)
+  }
+  # Copy all files from source to destination
+  file.copy(list.files(from, full.names = TRUE), to, overwrite = TRUE)
+}
+
+# Copy figures
+for(i in seq_len(nrow(fig_crosswalk))){
+  copy_files(from = fig_crosswalk$original_figs[i], to = fig_crosswalk$dash_figs[i])
+}
+
+# Copy data
+for(i in seq_along(data_files)){
+  file <- paste0(data_files[i], ".txt")
+  original_file <- paste0(original_fig_loc, original_data_loc[i], file)
+  new_file <- paste0(data_loc, file)
+  file.copy(from = original_file, to = new_file, overwrite = TRUE)
+}
+
 # SAV Figures
 figures <- list.files("www/figures", recursive = T,
                       full.names = TRUE, pattern = ".png")
@@ -353,10 +401,10 @@ MA_All <- MA_All %>% rowwise() %>% mutate(
   Oyster_Dens = fig_detect(figures, Abbreviation, "Oyster_Dens"),
   Oyster_PrcLive = fig_detect(figures, Abbreviation, "Oyster_PrcLive"),
   Oyster_SH = fig_detect(figures, Abbreviation, "Oyster_SH"),
-  Nekton_SpeciesRichness = fig_detect(figures, gsub(" ", "", ManagedAreaName), "Nekton_SpeciesRichness"),
-  Coral_pc = fig_detect(figures, gsub(" ", "", ManagedAreaName), "Coral_pc"),
-  Coral_SpeciesRichness = fig_detect(figures, gsub(" ", "", ManagedAreaName), "Coral_SpeciesRichness"),
-  CoastalWetlands_SpeciesRichness = fig_detect(figures, gsub(" ", "", ManagedAreaName), "CoastalWetlands_SpeciesRichness"),
+  Nekton_SpeciesRichness = fig_detect(figures, Abbreviation, "Nekton_SpeciesRichness"),
+  Coral_pc = fig_detect(figures, Abbreviation, "Coral_pc"),
+  Coral_SpeciesRichness = fig_detect(figures, Abbreviation, "Coral_SpeciesRichness"),
+  CoastalWetlands_SpeciesRichness = fig_detect(figures, Abbreviation, "CoastalWetlands_SpeciesRichness"),
 ) %>% ungroup()
 setDT(MA_All)
 
@@ -476,12 +524,13 @@ allTrendTables <- list(
 # Saving RDS objects ----
 #########################
 rds_to_save <- c("data_directory", "allMapData", "data_output_disc", "MA_All", 
-                 "plot_df", "publish_date", "sav_trends")
+                 "plot_df", "publish_date", "sav_trends", "oimmp", "chimmp")
 for(file in rds_to_save){
   saveRDS(get(file), file=paste0("rds/",file,".rds"))
 }
 
 ### EXPORT SHAPEFILE ###
+# Produces a shapefile containing all sample locations within SEACAR, by habitat
 # allPoints <- list()
 # for(h in c("sav","oyster","coral","cw","nekton")){
 #   data <- get(h)
