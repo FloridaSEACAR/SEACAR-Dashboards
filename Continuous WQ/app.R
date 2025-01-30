@@ -27,8 +27,7 @@ plot_theme <- theme_bw() +
         plot.title=element_text(hjust=0.5, size=12, color="#314963"),
         plot.subtitle=element_text(hjust=0.5, size=10, color="#314963"),
         legend.title=element_text(size=14),
-        legend.text = element_text(size=12),
-        legend.text.align = 0,
+        legend.text = element_text(size=12, hjust=0),
         axis.title.x = element_text(size=12, margin = margin(t = 5, r = 0,
                                                              b = 10, l = 0)),
         axis.title.y = element_text(size=12, margin = margin(t = 0, r = 10,
@@ -62,7 +61,7 @@ seacar_sp_palette <- c("#005396","#0088B1","#00ADAE","#65CCB3","#AEE4C1",
 files_to_load <- c("df_gaps", "df_gaps_by_entity", "map_df",
                    "table_display", "table_display_by_entity", "pal",
                    "species_sample_locations_pt", "publish_date","YM_combined", 
-                   "skt_combined")
+                   "skt_combined", "kendalltau_results")
 
 for(file in files_to_load){
   eval(call("<-", as.name(file), readRDS(paste0("rds/",file,".rds"))))
@@ -180,6 +179,12 @@ plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Prog
       min_year <- min(filtered_df$startYear)
       max_year <- max(filtered_df$endYear)
       
+      # Add buffer to sites with 1 year of data, allowing them to show on timeline
+      filtered_df <- filtered_df %>% mutate(
+        startYear = ifelse(startYear==endYear, startYear-0.25, startYear),
+        endYear = ifelse(endYear==startYear, endYear+0.25, endYear)
+      )
+      
       plot <- ggplot(filtered_df,
                      aes(x=startYear, xend=endYear, 
                          y=ProgramLocationID, yend=ProgramLocationID)) +
@@ -258,7 +263,7 @@ for(e in ents){
   }
 }
 
-habs <- c("SAV", "NEKTON", "CORAL", "Oyster", "CW")
+habs <- c("SAV", "NEKTON", "CORAL", "OYSTER", "CW")
 # Set habitat palette using unique SP palette
 hab_pal <- colorFactor(seacar_sp_palette, habs)
 
@@ -299,7 +304,8 @@ plot_cont <- function(plid, param){
   
   # Defining labels for y-axis
   unit <- cont_param_df[ParameterName==param, unit]
-  y_labels <- ifelse(param=="pH", unit, paste0(param, " (", unit, ")"))
+  y_labels <- ifelse(param=="pH", paste0("Monthly average ", unit), 
+                     paste0("Monthly average ", param, " (", unit, ")"))
   
   skt_stats <- skt_combined %>% 
     filter(ProgramLocationID==plid,
@@ -529,9 +535,11 @@ server <- function(input, output, session){
       selection = "none",
       rownames = FALSE,
       style = "bootstrap",
+      class = "table-bordered table-condensed",
       options = list(
         paging=TRUE,
-        pageLength=nrow(data)
+        pageLength=nrow(data),
+        autoWidth = TRUE
       ))
   })
   
@@ -544,11 +552,29 @@ server <- function(input, output, session){
       plid <- paste0("FKNMS",strsplit(input$select_button, "FKNMS")[[1]][2])
     }
     
+    table_data <- kendalltau_results[ParameterName==param & ProgramLocationID==plid, ] %>% 
+      mutate(`Period of Record` = paste0(EarliestYear, " - ", LatestYear),
+             Median = round(Median, 2),
+             tau = round(tau, 3),
+             SennIntercept = round(SennIntercept, 2),
+             SennSlope = round(SennSlope, 2),
+             p = round(p, 4)) %>%
+      select(ProgramLocationID, Trend, N_Data, N_Years, `Period of Record`, Median, tau, SennIntercept, SennSlope, p)
+    
     showModal(modalDialog(
       title = paste0(
         "Seasonal Kendall-Tau trend analysis for ", param, " - ", plid),
       renderPlot(plot_cont(plid = plid,
                            param = param)),
+      DT::renderDT(DT::datatable(
+        data = table_data,
+        escape = FALSE,
+        selection = "none",
+        rownames = FALSE,
+        style = "bootstrap",
+        class = "table-condensed",
+        options = list(autoWidth = TRUE)
+      )),
       easyClose = TRUE,
       size="l"))
     
@@ -644,24 +670,12 @@ server <- function(input, output, session){
 shinyApp(ui = ui, server = server)
 
 # library(rsconnect)
-## USE BELOW FOR EB01 FIX
 # deployApp(appFiles = c("app.R","rds/skt_combined.rds", "rds/YM_combined.rds",
 #                        "rds/df_gaps.rds", "rds/df_gaps_by_entity.rds",
 #                        "rds/map_df.rds", "rds/pal.rds",
 #                        "rds/species_sample_locations_pt.rds",
 #                        "rds/table_display.rds",
 #                        "rds/table_display_by_entity.rds",
-#                        "rds/publish_date.rds",
-#                        "README.md", "www/dep-logos.png",
-#                        "www/style.css"))
-
-
-# deployApp(appFiles = c("app.R","data/skt_combined.rds", "data/YM_combined.rds",
-#                        "rds/df_gaps.rds", "rds/df_gaps_by_entity.rds",
-#                        "rds/map_df.rds", "rds/pal.rds",
-#                        "rds/species_sample_locations_pt.rds",
-#                        "rds/table_display.rds",
-#                        "rds/table_display_by_entity.rds",
-#                        "rds/publish_date.rds",
+#                        "rds/publish_date.rds", "rds/kendalltau_results.rds",
 #                        "README.md", "www/dep-logos.png",
 #                        "www/style.css"))
