@@ -80,16 +80,21 @@ for(p in names(data_directory)){
 species_sites <- data.table()
 # Read in species-based Habitat files to plot their locations
 for(h_file in hab_files){
+  hab <- str_split(tail(str_split(h_file,"/")[[1]],1),"_")[[1]][2]
   hab_df <- fread(h_file, na.strings = "NULL", sep='|')
-  hab_df <- hab_df %>% group_by(ProgramID, ProgramLocationID) %>%
+  # Ensure only true corals are being plotted
+  if(hab=="CORAL"){
+    hab_df <- hab_df[SpeciesGroup1 %in% c("Octocoral","Milleporans","Scleractinian"),]
+  }
+  hab_df <- hab_df %>% group_by(LocationID, ProgramID, ProgramLocationID) %>%
     summarize(N_Data = n())
-  hab_df$habitat <- str_split(tail(str_split(h_file,"/")[[1]],1),"_")[[1]][2]
+  hab_df$habitat <- hab
   
   species_sites <- bind_rows(species_sites, hab_df)
 }
 
 # Reading in sample locations files (pt)
-sample_loc_date <- "5dec2024"
+sample_loc_date <- "5Mar2025"
 # Locate shape file
 loc_files <- list.files(paste0(seacar_shape_location, "/SampleLocations",sample_loc_date), pattern = ".shp", full.names = TRUE)
 # Filter for correct .shp file
@@ -98,11 +103,11 @@ pt_file <- str_subset(str_subset(loc_files, "_Point"), ".xml", negate = TRUE)
 sample_locs_pt <- st_read(pt_file)
 # Filter for sample locations available in SEACAR combined tables
 sample_locs_pt <- sample_locs_pt %>% 
-  filter(ProgramLoc %in% unique(species_sites$ProgramLocationID))
+  filter(LocationID %in% unique(species_sites$LocationID))
 # Merge shapefile and add habitat designation, number of data at each site
 species_sample_locations_pt <- merge(x=sample_locs_pt, y=species_sites,
-                                     by.x = c("ProgramLoc", "ProgramID"),
-                                     by.y = c("ProgramLocationID", "ProgramID"))
+                                     by.x = c("ProgramLoc", "ProgramID", "LocationID"),
+                                     by.y = c("ProgramLocationID", "ProgramID", "LocationID"))
 
 # Create popups for display on Leaflet map
 species_sample_locations_pt <- species_sample_locations_pt %>%
@@ -153,10 +158,21 @@ df <- df[!is.na(ProgramLocationID)]
 # Group all others as "Other"
 # df <- df[!Entity %in% highlights, `:=` (Entity = "Other")]
 
+# Function to display years within popup boxes
+collapse_years <- function(years) {
+  years <- sort(unique(years))
+  gaps <- c(TRUE, diff(years) > 1)
+  starts <- years[gaps]
+  ends <- years[c(gaps[-1], TRUE)]
+  # Format the output with ranges or single years
+  formatted <- ifelse(starts == ends, as.character(starts), paste(starts, ends, sep = "-"))
+  paste(formatted, collapse = ", ")
+}
+
 # Create summarised dataframe for use in map
 map_df <- df %>% group_by(ProgramLocationID, ProgramID, ProgramName, Entity) %>%
-  summarise(years = list(sort(unique(Year))),
-            params = list(unique(Parameter)), 
+  summarise(years = collapse_years(Year),
+            params = paste(unique(Parameter), collapse = ", "), 
             YearMin = min(Year),
             YearMax = max(Year),
             Data_N = sum(Data_N),
@@ -182,7 +198,7 @@ map_df$Data_N <- formatC(map_df$Data_N, format="d", big.mark = ",")
 map_df <- map_df %>%
   mutate(popup = paste("<br> <b>ProgLocID</b>: ", ProgramLocationID,
                        "<br> <b>ProgramName</b> (ID): ", ProgramName," (",ProgramID,")",
-                       "<br> <b>Data_N</b>: ", Data_N,
+                       "<br> <b>Amount of Data</b>: ", Data_N,
                        "<br> <b>Years</b>: ", years,
                        "<br> <b>Params</b>: ", params),
          label = paste(ProgramLocationID))

@@ -159,8 +159,14 @@ plot_gantt <- function(type, ent="Aquatic Preserve Continuous Water Quality Prog
       
       # Filter further by Status
       # filtered_df and pal_df separate to keep palette intact
-      filtered_df <- pal_df %>% 
-        filter(Status %in% activeStatus)
+      # Active_locs ensures that data gaps are shown for locations which are active but have gaps in coverage
+      if("Active" %in% activeStatus){
+        active_locs <- pal_df[Status %in% activeStatus, unique(ProgramLocationID)]
+        filtered_df <- pal_df %>% filter(ProgramLocationID %in% active_locs)
+      } else {
+        active_locs <- pal_df[Status=="Active", unique(ProgramLocationID)]
+        filtered_df <- pal_df %>% filter(!ProgramLocationID %in% active_locs)
+      }
       
       # Allows color palette to display for unique programs in APCWQ and NERR SWMP
       # Set secondary color palette (by Program instead of Entity)
@@ -288,11 +294,6 @@ for(hab in habs){
 #                                      habs),
 #                    options = layersControlOptions(collapsed=TRUE))
 
-# UNCOMMENTED FOR EB01 FIX
-# Load in necessary files for continuous SKT plots
-# YM_combined <- readRDS("data/YM_combined.rds")
-# skt_combined <- readRDS("data/skt_combined.rds")
-
 # Creating units datatable for display in plots
 cont_param_df <- data.table(
   ParameterName = c("Dissolved Oxygen","Dissolved Oxygen Saturation","pH",
@@ -302,10 +303,13 @@ cont_param_df <- data.table(
 # Function to plot continuous plots
 plot_cont <- function(plid, param){
   
+  # Parameter names to lowercase, except for "pH" and "Secchi depth"
+  parameter_lower <- ifelse(param=="pH", param, str_to_lower(param))
+  
   # Defining labels for y-axis
   unit <- cont_param_df[ParameterName==param, unit]
-  y_labels <- ifelse(param=="pH", paste0("Monthly average ", unit), 
-                     paste0("Monthly average ", param, " (", unit, ")"))
+  y_labels <- ifelse(param=="pH", paste0("Monthly average ", parameter_lower), 
+                     paste0("Monthly average ", parameter_lower, " (", unit, ")"))
   
   skt_stats <- skt_combined %>% 
     filter(ProgramLocationID==plid,
@@ -425,6 +429,34 @@ funding_text <- paste(
   sep="<br><br>"
 )
 
+references <- paste(
+  tags$div(
+    HTML("<b>References</b>"),
+    style="text-align:center;"
+  ),
+  
+  tags$p(
+    class="hangingindent",
+    HTML("
+    Radabaugh KR, Moyer RP, Geiger SP, editors. 2019. 
+    Oyster integrated mapping and monitoring program report for the state of Florida. 
+    St. Petersburg, FL: Fish and Wildlife Research Institute, 
+    Florida Fish and Wildlife Conservation Commission. FWRI Technical Report 22.
+    ")
+  ),
+  
+  tags$p(
+    class="hangingindent",
+    HTML("
+    Radabaugh, Kara R., Christina E. Powell, and Ryan P. Moyer (eds.). 2017. 
+    Coastal Habitat Integrated Mapping and Monitoring Program Report for the State of Florida. 
+    Florida Fish and Wildlife Conservation Commission, Fish and Wildlife Research Institute Technical Report No. 21.
+    ")
+  ),
+  
+  sep = "<br><br>"
+)
+
 dep_colors <- c("#2E5270","#6D869B","#C8EAFB")
 
 #### BEGIN SHINY UI AND SERVER SETTINGS ####
@@ -433,6 +465,7 @@ ui <- fluidPage(
   useShinyjs(),
   tags$head(
     tags$link(rel = "stylesheet", type = "text/css", href = "www/style.css")),
+  tags$head(includeHTML("www/google-analytics.html")),
   titlePanel("SEACAR Continuous WQ Dashboard"),
   fluidRow(
     column(4,
@@ -485,6 +518,9 @@ ui <- fluidPage(
     column(6,
            wellPanel(
              htmlOutput("funding")
+           ),
+           wellPanel(
+             htmlOutput("refs")
            )),
     column(3)
     
@@ -588,6 +624,10 @@ server <- function(input, output, session){
     HTML(funding_text)
   })
   
+  output$refs <- renderUI({
+    HTML(references)
+  })
+  
   activeChoices <- reactive({
     unique(display_table(e(), activeStatus=c("Active","Historical"))$Status)
   })
@@ -678,4 +718,4 @@ shinyApp(ui = ui, server = server)
 #                        "rds/table_display_by_entity.rds",
 #                        "rds/publish_date.rds", "rds/kendalltau_results.rds",
 #                        "README.md", "www/dep-logos.png",
-#                        "www/style.css"))
+#                        "www/style.css", "www/google-analytics.html"))
