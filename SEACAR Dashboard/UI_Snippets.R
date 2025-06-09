@@ -1,4 +1,18 @@
 publish_date <- readRDS("rds/publish_date.rds")
+
+# Overview text
+overview_text <- HTML("SEACAR is a stakeholder driven collaborative project working with local, state, and federal agencies, academic institutions, and non-governmental organizations to utilize current knowledge and scientific data to assess the status and trends of submerged habitats and provide the best available science to help guide planning, management, restoration and policy decisions.</br></br>
+                      The SEACAR Data Discovery site brings together data from 5 habitats, 16 habitat-specific indicators, and 63 parameters. </br><i>The dashboard does not include water quality, clarity, or nutrients data.</i>")
+
+# References
+ref1 <- "Radabaugh KR, Moyer RP, Geiger SP, editors. 2019. Oyster integrated mapping and monitoring program report for the state of Florida. 
+St. Petersburg, FL: Fish and Wildlife Research Institute, 
+Florida Fish and Wildlife Conservation Commission. FWRI Technical Report 22."
+
+ref2 <- "Radabaugh, Kara R., Christina E. Powell, and Ryan P. Moyer (eds.). 2017. 
+Coastal Habitat Integrated Mapping and Monitoring Program Report for the State of Florida. 
+Florida Fish and Wildlife Conservation Commission, Fish and Wildlife Research Institute Technical Report No. 21."
+
 # Text to declare funding
 funding_text <- paste(
   tags$div("Funding Acknowledgement", style="text-align:center; font-weight:bold;"),
@@ -23,6 +37,13 @@ funding_text <- paste(
   ),
   
   tags$div(paste0("Published: ", publish_date), style="text-align:center;"),
+  
+  tags$div(HTML("<b>References</b>"), style="text-align:center;"),
+  
+  tags$ul(
+    tags$li(paste("1.", ref1)),
+    tags$li(paste("2.", ref2))
+  ),
   
   sep="<br><br>"
 )
@@ -77,7 +98,7 @@ habitatText <- function(habitat){
     root systems that enable them to withstand brief storm surges, buffering the 
     impact to upland areas. Wetlands also prevent erosion and sediments from washing 
     offshore while filtering nutrients, sediments and toxic contaminants."
-  } else if(habitat=="Nekton"){
+  } else if(habitat=="Water Column (Nekton)"){
     t <- "Nekton refers to the free-swimming animals living in the water column. 
     Among many inhabitants are fish, macroinvertebrates like shrimp, octopus, and 
     jellyfish and megafauna like dolphins and manatees."

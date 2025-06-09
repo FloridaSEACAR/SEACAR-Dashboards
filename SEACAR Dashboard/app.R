@@ -11,5 +11,6 @@ shinyApp(ui = ui, server = server)
 # deployApp(appFiles = c("app.R", "UI.R", "Server.R", "UI_Snippets.R",
 #                        "rds/allMapData.rds", "rds/data_directory.rds",
 #                        "rds/MA_All.rds", "rds/plot_df.rds", "rds/publish_date.rds",
-#                        "rds/sav_trends.rds", "rds/oimmp.rds", "rds/chimmp.rds",
-#                        "www/style.css", "www/dep-logos.png", "www/figures/"))
+#                        "rds/allTrendTables.rds", "rds/oimmp.rds", "rds/chimmp.rds",
+#                        "www/style.css", "www/dep-logos.png", "www/figures/", 
+#                        "www/google-analytics.html"))

@@ -13,6 +13,7 @@ library(sf)
 library(xlsx)
 library(tidyr)
 library(purrr)
+library(rmapshaper)
 
 wd <- dirname(getActiveDocumentContext()$path)
 setwd(wd)
@@ -29,7 +30,7 @@ plot_theme <- theme_bw() +
         plot.title=element_text(hjust=0.5, size=12, color="#314963"),
         plot.subtitle=element_text(hjust=0.5, size=10, color="#314963"),
         legend.title=element_text(size=10),
-        legend.text.align = 0,
+        legend.text = element_text(hjust=0),
         axis.title.x = element_text(size=10, margin = margin(t = 5, r = 0,
                                                              b = 10, l = 0)),
         axis.title.y = element_text(size=10, margin = margin(t = 0, r = 10,
@@ -43,7 +44,7 @@ source("load_shape_samples.R")
 # File Import ----
 files <- list.files(seacar_data_location, full.names = T)
 
-disc_files <- str_subset(str_subset(files, "_WQ_WC_NUT"), "_cont_", negate=T)
+# disc_files <- str_subset(str_subset(files, "_WQ_WC_NUT"), "_cont_", negate=T)
 
 sav <- fread(str_subset(files, "SAV"), sep='|', na.strings = "NULL")
 sav <- sav[Include == 1 & MADup==1, ]
@@ -60,9 +61,25 @@ cw <- cw[Include == 1 & MADup==1, ]
 nekton <- fread(str_subset(files, "NEKTON"), sep='|', na.strings = "NULL")
 nekton <- nekton[Include == 1 & MADup==1, ]
 
+# # Process discrete data
+# disc_files <- str_subset(str_subset(files, "_WQ_WC_NUT"), "_cont_", negate=T)
+# disc_params <- c("Chlorophyll a, Corrected for Pheophytin", "Chlorophyll a, Uncorrected for Pheophytin",
+#                  "Colored Dissolved Organic Matter","Dissolved Oxygen","Dissolved Oxygen Saturation",
+#                  "pH","Salinity", "Secchi Depth", "Total Nitrogen", "Total Phosphorus", "Total Suspended Solids", "Turbidity", "Water Temperature")
+# discrete <- data.table()
+# for(file in disc_files){
+#   df <- fread(file, sep='|', na.strings = "NULL")
+#   param <- unique(df$ParameterName)
+#   if(!param %in% disc_params) next
+#   # Grab units for each parameter
+#   df$Units <- db_thresholds[Habitat=="Water Column" & ParameterName==param, unique(Units)]
+#   discrete <- bind_rows(discrete, df)
+# }
+# discrete$LocationID <- discrete$ProgramLocationID
+
 # Create named habitats list to populate selections
 habitats <- c("sav" = "Submerged Aquatic Vegetation", "oyster" = "Oyster Reef", 
-              "coral" = "Coral Reef", "cw" = "Coastal Wetlands", "nekton" = "Nekton")
+              "coral" = "Coral Reef", "cw" = "Coastal Wetlands", "nekton" = "Water Column (Nekton)")
 
 # Function to find gaps in years by program (Gantt timeline)
 find_gaps <- function(years) {
@@ -105,14 +122,16 @@ for(h in names(habitats)){
   
   # DB_Thresholds file lists habitat as Water Column, make exception for Nekton
   # Convert "Oyster" back to "Oyster/Oyster Reef" format to match db_thresholds Habitat format, same for Coral
-  hab_subset <- ifelse(habitat=="Nekton", "Water Column", 
+  hab_subset <- ifelse(habitat %in% c("Water Column (Nekton)", "Water Column (Discrete)"), "Water Column", 
                        ifelse(habitat %in% c("Oyster Reef","Coral Reef"), 
                               paste0(str_split_1(habitat, " ")[1],"/",habitat), 
                               habitat))
   
-  # Merge in Units from db_thresholds
-  data <- merge(data, db_thresholds[Habitat==hab_subset], 
-                by=c("ParameterName","Habitat"), allow.cartesian=T)
+  # Merge in Units from db_thresholds (discrete already has units)
+  if(!h=="discrete"){
+    data <- merge(data, db_thresholds[Habitat==hab_subset], 
+                  by=c("ParameterName","Habitat"), allow.cartesian=T) 
+  }
   
   # Exclude parameters
   data <- data[!ParameterName %in% params_to_exclude, ]
@@ -152,6 +171,16 @@ for(h in names(habitats)){
   data_directory[[habitat]][["programYears"]] <- programYears
   
   ### MapData
+  # Function to display years within popup boxes
+  collapse_years <- function(years){
+    years <- sort(unique(years))
+    gaps <- c(TRUE, diff(years) > 1)
+    starts <- years[gaps]
+    ends <- years[c(gaps[-1], TRUE)]
+    # Format the output with ranges or single years
+    formatted <- ifelse(starts == ends, as.character(starts), paste(starts, ends, sep = "-"))
+    paste(formatted, collapse = ", ")
+  }
   # Get unique ProramIDs
   programs <- unique(data$ProgramID)
   program_locs <- unique(data$ProgramLocationID)
@@ -159,15 +188,27 @@ for(h in names(habitats)){
   ma_data <- data %>% 
     group_by(ProgramLocationID, ProgramID, ProgramName, LocationID) %>%
     summarise(n_data = n(), 
-              years = list(sort(unique(Year))), 
-              params = list(unique(ParameterName)), .groups="keep")
+              years = collapse_years(Year), 
+              params = paste(unique(ParameterName), collapse = ", "), .groups="keep")
   
   # Grab shapefile points, filter for relevant programs and programLocs
   df <- point %>% filter(ProgramID %in% programs)
   
-  mapData <- merge(x=ma_data, y=df, 
-                       by.x=c("ProgramLocationID", "ProgramID", "LocationID"), 
-                       by.y=c("ProgramLoc","ProgramID","LocationID")) %>%
+  if(habitat=="Coral Reef"){
+    pre_data <- data %>% 
+      filter(SpeciesGroup1 %in% c("Octocoral","Milleporans","Scleractinian")) %>%
+      group_by(ProgramLocationID, ProgramID, ProgramName, LocationID) %>%
+      summarise(n_data = n(), 
+                years = collapse_years(Year), 
+                params = paste(unique(ParameterName), collapse = ", "), .groups="keep")
+  } else {
+    pre_data <- ma_data
+  }
+  
+  # Create mapdata file
+  mapData <- merge(x=pre_data, y=df, 
+                   by.x=c("ProgramLocationID", "ProgramID", "LocationID"), 
+                   by.y=c("ProgramLoc","ProgramID","LocationID")) %>%
     mutate(popup = paste("ProgramID: ", ProgramID, 
                          "<br> ProgramName: ", ProgramName, 
                          "<br> LocID: ", LocationID, 
@@ -236,15 +277,15 @@ setDT(allMapData)
 # Point to location where Disc objects are located
 data_obj_loc <- "../../SEACAR_Trend_Analyses/WQ_Cont_Discrete/output/tables/"
 
-# Makes use of discrete data object outputs from MA Report Generation
+# Makes use of discrete data object outputs from WQ_Cont_Discrete
 # Lists of disc and cont .rds objects to read
 disc_files <- list.files(paste0(data_obj_loc,"disc/"),pattern = "\\.rds$", full.names = T)
+disc_files <- str_subset(disc_files, "skt_stats_disc", negate = TRUE)
 cont_files <- list.files(paste0(data_obj_loc,"cont/"),pattern = "\\.rds$", full.names = T)
 
 # function of parameter, activity type, depth, with specified filetype
 # retrieves RDS filepath to be loaded
 get_files <- function(p, a, d, filetype) {
-  
   # "data" contains overall data for each param, regardless of depth/activity
   if (filetype == "data") {
     pattern <- paste0(p,"_",filetype)
@@ -318,27 +359,6 @@ data_output_disc <- setDT(do.call(rbind, lapply(str_subset(disc_files, "data"), 
 #                                                                         ifelse(str_detect(param, "Score"),"star","No")))))))
 # setDT(icon_df)
 
-# Function to check for available figures by MA, provides filepath if T, otherwise F 
-fig_detect <- function(figures, ma_short, plot_type) {
-  # Create regex patterns for both possible orders
-  pattern1 <- paste0("(?i)", ma_short, ".*", plot_type)
-  pattern2 <- paste0("(?i)", plot_type, ".*", ma_short)
-  
-  # Detect files matching either pattern
-  matched_files1 <- str_subset(figures, pattern1)
-  matched_files2 <- str_subset(figures, pattern2)
-  
-  # Combine matched files from both patterns
-  matched_files <- c(matched_files1, matched_files2)
-  
-  # Return the first matched file path if any, else return FALSE
-  if (length(matched_files) > 0) {
-    return(matched_files[1])
-  } else {
-    return("FALSE")
-  }
-}
-
 ### COPY FIGURES ###
 # This code locates the necessary .png and .txt outputs from each habitat in
 # SEACAR_Trend_Analyses and copies them into the dashboard folder www/figures
@@ -346,11 +366,13 @@ fig_detect <- function(figures, ma_short, plot_type) {
 dash_fig_loc <- "www/figures/"
 dash_fig_folders <- c("CoastalWetlandsFigures/","CoralPCFigures/","CoralSpeciesRichnessFigures/",
                       "NektonFigures/", "OysterDensityFigures/", "OysterPercentLiveFigures/",
-                      "OysterShellHeightFigures/", "SAVFigures_common/")
+                      "OysterShellHeightFigures/", "SAVFigures_common/barplots", 
+                      "SAVFigures_common/multiplots", "SAVFigures_common/trendplots")
 original_fig_loc <- "../../SEACAR_Trend_Analyses/"
 original_fig_folders <- c("Coastal_Wetlands/output/Figures/", "Coral/output/PercentCover/Figures/", "Coral/output/SpeciesRichness/Figures/",
                           "Nekton/output/Figures/", "Oyster/output/Density/Figures/", "Oyster/output/Percent_Live/Figures/", 
-                          "Oyster/output/Shell_Height/Figures/", "SAV/output/website/images/")
+                          "Oyster/output/Shell_Height/Figures/", "SAV/output/website/images/barplots", 
+                          "SAV/output/website/images/multiplots", "SAV/output/website/images/trendplots")
 
 fig_crosswalk <- data.table(
   "dash_figs" = paste0(dash_fig_loc, dash_fig_folders),
@@ -359,10 +381,12 @@ fig_crosswalk <- data.table(
 
 data_loc <- "data/"
 data_files <- c("CoastalWetlands_SpeciesRichness_MA_Overall_Stats",
-                "Coral_PC_LME_Stats", "Nekton_SpeciesRichness_MA_Overall_Stats",
+                "Coral_PC_LME_Stats", "Coral_SpeciesRichness_MA_Overall_Stats", 
+                "Nekton_SpeciesRichness_MA_Overall_Stats",
                 "Oyster_All_GLMM_Stats", "SAV_BBpct_LMEresults_All")
 original_data_loc <- c("Coastal_Wetlands/output/",
-                       "Coral/output/PercentCover/", "Nekton/output/",
+                       "Coral/output/PercentCover/", "Coral/output/SpeciesRichness/",
+                       "Nekton/output/",
                        "Oyster/output/", "SAV/output/website/")
 
 copy_files <- function(from, to) {
@@ -379,6 +403,13 @@ for(i in seq_len(nrow(fig_crosswalk))){
   copy_files(from = fig_crosswalk$original_figs[i], to = fig_crosswalk$dash_figs[i])
 }
 
+# Copy only select SAV_WC figures (water clarity only)
+sav_wc_figs <- list.files("../../SEACAR_Trend_Analyses/SAV_WC_Analysis/output/", full.names = T, pattern = ".png")
+sav_wc_figs <- str_subset(sav_wc_figs, "Turbidity|TSS|Secchidepth|Chla|CDOM")
+sav_wc_filepath <- "www/figures/SAV_WC_Figures/"
+if(!file.exists(sav_wc_filepath)){dir.create(sav_wc_filepath)}
+file.copy(sav_wc_figs, "www/figures/SAV_WC_Figures", overwrite = TRUE)
+
 # Copy data
 for(i in seq_along(data_files)){
   file <- paste0(data_files[i], ".txt")
@@ -387,9 +418,40 @@ for(i in seq_along(data_files)){
   file.copy(from = original_file, to = new_file, overwrite = TRUE)
 }
 
-# SAV Figures
+# all Figures
 figures <- list.files("www/figures", recursive = T,
                       full.names = TRUE, pattern = ".png")
+
+# Function to check for available figures by MA, provides filepath if T, otherwise F 
+fig_detect <- function(figures, ma_short, plot_type) {
+  # Subset by MA initially to prevent partial MA matching
+  if(plot_type=="SAV_WC_Figures"){
+    ma_figs <- str_subset(figures, paste0("/", ma_short))
+  } else {
+    ma_figs <- str_subset(figures, paste0("_", ma_short))
+  }
+  # Create regex patterns for both possible orders
+  pattern1 <- paste0("(?i)", ma_short, ".*", plot_type)
+  pattern2 <- paste0("(?i)", plot_type, ".*", ma_short)
+  
+  # Detect files matching either pattern
+  matched_files1 <- str_subset(ma_figs, pattern1)
+  matched_files2 <- str_subset(ma_figs, pattern2)
+  
+  # Combine matched files from both patterns
+  matched_files <- c(matched_files1, matched_files2)
+  
+  # Return the first matched file path if any, else return FALSE
+  if(length(matched_files) > 0 & plot_type=="SAV_WC_Figures"){
+    return(paste(matched_files, collapse = ", "))
+  } else if(length(matched_files) > 0 & str_detect(plot_type, "Oyster")){
+    return(paste(matched_files, collapse = ", "))
+  } else if(length(matched_files) > 0){
+    return(matched_files[1])
+  } else {
+    return("FALSE")
+  }
+}
 
 # Create associations for filepaths in MA_All
 # Function within Server.R will plot on dashboard using these filepaths
@@ -405,6 +467,7 @@ MA_All <- MA_All %>% rowwise() %>% mutate(
   Coral_pc = fig_detect(figures, Abbreviation, "Coral_pc"),
   Coral_SpeciesRichness = fig_detect(figures, Abbreviation, "Coral_SpeciesRichness"),
   CoastalWetlands_SpeciesRichness = fig_detect(figures, Abbreviation, "CoastalWetlands_SpeciesRichness"),
+  sav_wc = fig_detect(figures, Abbreviation, "SAV_WC_Figures")
 ) %>% ungroup()
 setDT(MA_All)
 
@@ -415,6 +478,12 @@ setDT(MA_All)
 
 # Dataframe to store titles and alt text for figure display
 plot_info <- list(
+  sav_wc = list(
+    title = "Combined Water Clarity - SAV Plots for ",
+    alt = "Combined Water Clarity - SAV Plots",
+    label = "Water Clarity - SAV",
+    habitat = "Submerged Aquatic Vegetation"
+  ),
   multiplot = list(
     title = "Median percent cover for ",
     alt = "Median Percent LME Trends",
@@ -455,7 +524,7 @@ plot_info <- list(
     title = "Nekton Species Richness for ",
     alt = "Nekton Species Richness",
     label = "Nekton Species Richness",
-    habitat = "Nekton"
+    habitat = "Water Column (Nekton)"
   ),
   Coral_pc = list(
     title = "Coral Percent Cover trend for ",
@@ -479,12 +548,19 @@ plot_info <- list(
 
 plot_df <- setDT(map_df(plot_info, ~as.data.frame(.x), .id = "plot_type"))
 
-# Incorporate trend tables for each habitat
+##### Incorporate trend tables for each habitat -----
+# Renaming columns for presentation, creating `Period of Record` column,
+# select relevant columns for each, including ManagedAreaName and ParameterName
+# which are required for filtering the dataframe, but will not be displayed in final tables
 ## SAV
 sav_trends <- fread("data/SAV_BBpct_LMEresults_All.txt", sep='|')
 sav_trends[, `:=` ("Period of Record" = paste0(EarliestYear, " - ", LatestYear))]
-sav_trends <- sav_trends[, c("ManagedAreaName","Species","StatisticalTrend",
-                             "Period of Record","LME_Intercept","LME_Slope","p")]
+sav_trends <- sav_trends %>% filter(!Species=="No grass in quadrat") %>%
+  rename(`Statistical Trend` = StatisticalTrend,
+         `LME Intercept` = LME_Intercept, `LME Slope` = LME_Slope) %>% 
+  select("ManagedAreaName","Species","Statistical Trend","Period of Record","LME Intercept","LME Slope","p") %>% 
+  as.data.table()
+
 ## Oyster
 # Function pulled from CheckTrendText.R from QAQC-Tools repo
 checkOysterTrends <- function(modelEstimate, lowConfidence, upConfidence, suffData){
@@ -509,22 +585,86 @@ checkOysterTrends <- function(modelEstimate, lowConfidence, upConfidence, suffDa
 oy_trends <- fread("data/Oyster_All_GLMM_Stats.txt", sep='|')
 oy_trends <- oy_trends %>% rowwise() %>% 
   mutate(TrendStatus = checkOysterTrends(ModelEstimate, LowerConfidence, UpperConfidence, SufficientData)) %>% ungroup() %>%
-  mutate(CredibleInterval = paste0(round(LowerConfidence,2), " to ", round(UpperConfidence,2))) %>%
+  mutate(CredibleInterval = ifelse((!is.na(LowerConfidence)&!is.na(UpperConfidence)),paste0(round(LowerConfidence,2), " to ", round(UpperConfidence,2)), NA)) %>%
   select(ManagedAreaName, ParameterName, ShellType, HabitatType, SizeClass, TrendStatus, ModelEstimate, 
-         StandardError, CredibleInterval)
-setDT(oy_trends)
+         StandardError, CredibleInterval) %>% 
+  rename(`Shell Type` = ShellType, `Habitat Type` = HabitatType, `Size Class` = SizeClass,
+         `Trend Status` = TrendStatus, `Estimate` = ModelEstimate, 
+         `Standard Error` = StandardError, `Credible Interval` = CredibleInterval) %>%
+  as.data.table()
+
+## Coral
+# Function to generate trend text for LME results (from CheckTrendText.R)
+checkTrends <- function(p, LME_Slope, SufficientData){
+  if(SufficientData){
+    if(is.na(LME_Slope)){
+      return("Model did not fit the available data")
+    } else {
+      increasing <- LME_Slope > 0
+      trendPresent <- p <= 0.05
+      trendStatus <- "No significant trend"
+      if(trendPresent){
+        trendStatus <- ifelse(increasing, "Significantly increasing trend", 
+                              "Significantly decreasing trend")
+      }          
+    }
+  } else {
+    trendStatus <- "Insufficient data to calculate trend"
+  }
+  return(trendStatus)
+}
+# Percent Cover
+coral_pc_trends <- fread("data/Coral_PC_LME_Stats.txt", sep='|') %>% 
+  rowwise() %>%
+  mutate(`Statistical Trend` = checkTrends(p = LME_p, LME_Slope = LME_Slope, 
+                                           SufficientData = SufficientData),
+         `Period of Record` = paste0(EarliestYear, " - ", LatestYear)) %>% 
+  ungroup() %>% rename(`LME Intercept` = LME_Intercept, `LME Slope` = LME_Slope, 
+                       `p` = LME_p) %>% 
+  select(ManagedAreaName, `Statistical Trend`, `Period of Record`, 
+         `LME Intercept`, `LME Slope`, p) %>% as.data.table()
+# Species Richness
+coral_sr_trends <- fread("data/Coral_SpeciesRichness_MA_Overall_Stats.txt", sep='|') %>%
+  mutate(`Period of Record` = paste0(EarliestYear, " - ", LatestYear)) %>%
+  rename(`Sample Count` = N_Data, `Number of Years` = N_Years, 
+         `Median # of Taxa` = Median, `Mean # of Taxa` = Mean) %>% 
+  select(ManagedAreaName, `Sample Count`, `Number of Years`, `Period of Record`, 
+         `Median # of Taxa`, `Mean # of Taxa`) %>% as.data.table()
+
+## Nekton
+nekton_trends <- fread("data/Nekton_SpeciesRichness_MA_Overall_Stats.txt", sep='|') %>%
+  mutate(`Period of Record` = paste0(EarliestYear, " - ", LatestYear),
+         GearType = paste0(GearType, " (", GearSize_m, " m)")) %>% 
+  rename(`Gear Type` = GearType,`Sample Count` = N_Data, 
+         `Number of Years` = N_Years, `Median # of Taxa` = Median, 
+         `Mean # of Taxa` = Mean) %>%
+  select(ManagedAreaName, `Gear Type`, `Sample Count`, `Number of Years`, `Period of Record`, 
+         `Median # of Taxa`, `Mean # of Taxa`) %>% as.data.table()
+
+## Coastal Wetlands
+cw_trends <- fread("data/CoastalWetlands_SpeciesRichness_MA_Overall_Stats.txt", sep='|') %>% 
+  mutate(`Period of Record` = paste0(EarliestYear, " - ", LatestYear)) %>% 
+  rename(`Species Group` = SpeciesGroup1, `Sample Count` = N_Data, 
+         `Number of Years` = N_Years, `Median # of Taxa` = Median, `Mean # of Taxa` = Mean) %>%
+  select(ManagedAreaName, `Species Group`, `Sample Count`, `Number of Years`, 
+         `Period of Record`, `Median # of Taxa`, `Mean # of Taxa`) %>%
+  as.data.table()
 
 # Overall TrendTable object
 allTrendTables <- list(
-  "Submerged Aquatic Vegetation" = sav_trends,
-  "Oyster Reef" = oy_trends
+  "sav_trends" = sav_trends,
+  "oy_trends" = oy_trends,
+  "coral_sr_trends" = coral_sr_trends,
+  "coral_pc_trends" = coral_pc_trends,
+  "nekton_trends" = nekton_trends,
+  "cw_trends" = cw_trends
 )
 
 #########################
 # Saving RDS objects ----
 #########################
-rds_to_save <- c("data_directory", "allMapData", "data_output_disc", "MA_All", 
-                 "plot_df", "publish_date", "sav_trends", "oimmp", "chimmp")
+rds_to_save <- c("data_directory", "allMapData", "MA_All",
+                 "plot_df", "publish_date", "allTrendTables", "oimmp", "chimmp")
 for(file in rds_to_save){
   saveRDS(get(file), file=paste0("rds/",file,".rds"))
 }

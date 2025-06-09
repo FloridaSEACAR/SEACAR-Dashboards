@@ -1,12 +1,3 @@
-library(shiny)
-library(dplyr)
-library(data.table)
-library(stringr)
-library(ggplot2)
-library(DT)
-library(purrr)
-library(sf)
-
 # Functions ----
 # returns number of programs for each parameter
 plotProgramParams <- function(h, ret="plot"){
@@ -66,33 +57,27 @@ displaySummaryTable <- function(h, id, type){
   }
 }
 
-# Trend tables for SAV plots
+# Trend tables display under plots for each habitat
 trendTables <- function(h, ma, plot_type){
-  if(h=="Submerged Aquatic Vegetation"){
-    sav_trends %>% filter(ManagedAreaName==ma) %>% select(-ManagedAreaName)
-  }
-  else if(h=="Oyster Reef"){
+  if(h=="Oyster Reef"){
     param <- ifelse(plot_type=="Oyster_Dens", "Density",
                     ifelse(plot_type=="Oyster_SH", "Shell Height","Percent Live"))
+    df <- oy_trends
     if(plot_type=="Oyster_SH"){
-      oy_trends %>% filter(ManagedAreaName==ma, ParameterName==param, !SizeClass=="") %>% 
-        select(-c(ManagedAreaName, ParameterName, HabitatType)) %>% 
-        rename("Shell Type" = "ShellType",
-               "Size Class" = "SizeClass",
-               "Trend Status" = "TrendStatus",
-               "Estimate" = "ModelEstimate",
-               "Standard Error" = "StandardError",
-               "Credible Interval" = "CredibleInterval")
+      df %>% filter(ManagedAreaName==ma, ParameterName==param, 
+                    !`Size Class`=="", `Habitat Type`=="Natural") %>% 
+        select(-c(ManagedAreaName, ParameterName, "Habitat Type"))
     } else {
-      oy_trends %>% filter(ManagedAreaName==ma, ParameterName==param) %>% 
-        select(-c(ManagedAreaName, ParameterName, SizeClass)) %>%
-        rename("Shell Type" = "ShellType",
-               "Habitat Type" = "HabitatType",
-               "Trend Status" = "TrendStatus",
-               "Estimate" = "ModelEstimate",
-               "Standard Error" = "StandardError",
-               "Credible Interval" = "CredibleInterval")
+      df %>% filter(ManagedAreaName==ma, ParameterName==param) %>% 
+        select(-c(ManagedAreaName, ParameterName, "Size Class"))
     }
+  } else {
+    if(h=="Submerged Aquatic Vegetation"){df<-sav_trends}
+    if(h=="Coral Reef"){if(plot_type=="Coral_SpeciesRichness"){
+      df<-coral_sr_trends} else if(plot_type=="Coral_pc"){df<-coral_pc_trends}}
+    if(h=="Coastal Wetlands"){df<-cw_trends}
+    if(h=="Water Column (Nekton)"){df<-nekton_trends}
+    df %>% filter(ManagedAreaName==ma) %>% select(-ManagedAreaName)
   }
 }
 
@@ -103,33 +88,87 @@ showPlot <- function(type, ma, ma_short, h){
   title <- paste0(plot_df[plot_type==type, title], ma)
   
   # List of plot types that don't need tables
-  plots_sans_tables <- c("barplot_sp")
+  plots_sans_tables <- c("barplot_sp", "sav_wc")
   
   if(type %in% hab_plot_types) {
     # Add trend tables for necessary plots only
     if(!type %in% plots_sans_tables){
       addTable <- tagList(
         tags$h4("Trend Results Table"),
-        tags$div(tableOutput("trendTable"),style = "margin: 0 auto;")
+        tags$div(tableOutput("trendTable"),style = "max-width: fit-content; margin-left: auto; margin-right: auto;")
       )
     } else {addTable <- ""}
-    showModal(
-      modalDialog(
-        title = title,
-        tags$div(
-          tags$img(
-            src = src,
-            alt = plot_df[plot_type==type, alt],
-            height = "100%",
-            width = "100%"
+    if(type=="sav_wc"){
+      src <- str_split_1(MA_All[Abbreviation==ma_short, get(type)], ", ")
+      nav_panels <- lapply(seq_along(src), function(i){
+        p <- str_split_1(str_split_1(src[i], ma_short)[[2]], "_")[2]
+        # Convert from short-hand to full name
+        if(p=="Chla"){p_long<-"Chlorophyll a"} 
+        else if(p=="Secchidepth"){p_long<-"Secchi depth"} 
+        else if(p=="CDOM"){p_long <- "Colored Dissolved Organic Matter"} 
+        else if(p=="TSS"){p_long <- "Total Suspended Solids"}
+        else if(p=="Turbidity"){p_long <- p}
+        
+        nav_panel(p_long,
+                  tags$img(src = src[i],
+                           height = "100%",
+                           width = "100%"))
+      })
+      showModal(
+        modalDialog(
+          title = title,
+          tags$div(
+            do.call(navset_card_tab, c(nav_panels)),
+            style = "text-align:center;"
           ),
-          addTable,
-          style = "text-align:center;"
-        ),
-        size = "l",
-        easyClose = T
+          size = "l",
+          easyClose = T
+        )
       )
-    )
+    } else if(str_detect(type, "Oyster")){
+      src <- str_split_1(MA_All[Abbreviation==ma_short, get(type)], ", ")
+      nav_panels <- lapply(seq_along(src), function(i){
+        if(str_detect(src[i], "Natural")){
+          reef_type <- "Natural Reef"
+        } else if(str_detect(src[i], "Restored")){
+          reef_type <- "Restored Reef"
+        }
+        nav_panel(reef_type,
+                  tags$img(src = src[i],
+                           height = "100%",
+                           width = "100%"))
+      })
+      showModal(
+        modalDialog(
+          title = title,
+          tags$div(
+            do.call(navset_card_tab, c(nav_panels)),
+            addTable,
+            style = "text-align:center;"
+          ),
+          size = "l",
+          easyClose = T
+        )
+      )
+    } else {
+      showModal(
+        modalDialog(
+          title = title,
+          tags$div(
+            tags$img(
+              src = src,
+              alt = plot_df[plot_type==type, alt],
+              height = "100%",
+              width = "100%"
+            ),
+            addTable,
+            style = "text-align:center;"
+          ),
+          size = "l",
+          easyClose = T
+        )
+      )      
+    }
   }
 }
 
@@ -140,8 +179,7 @@ plot_theme <- theme_bw() +
         text=element_text(family="Arial"),
         plot.title=element_text(hjust=0.5, size=12, color="#314963"),
         plot.subtitle=element_text(hjust=0.5, size=10, color="#314963"),
-        legend.title=element_text(size=10),
-        legend.text.align = 0,
+        legend.title=element_text(size=10, hjust=0),
         axis.title.x = element_text(size=10, margin = margin(t = 5, r = 0,
                                                              b = 10, l = 0)),
         axis.title.y = element_text(size=10, margin = margin(t = 0, r = 10,
@@ -158,19 +196,26 @@ seacar_sp_palette <- c("#005396","#0088B1","#00ADAE","#65CCB3","#AEE4C1",
 
 
 rds_to_load <- c("data_directory", "allMapData", "MA_All", "plot_df",
-                 "publish_date", "sav_trends","oimmp", "chimmp")
+                 "publish_date", "allTrendTables","oimmp", "chimmp")
 for(file in rds_to_load){
   eval(call("<-", as.name(file), readRDS(paste0("rds/",file,".rds"))))
 }
 
+# Unpack allTrendTables, create distinct objects for each
+for(file in names(allTrendTables)){
+  eval(call("<-", as.name(file), allTrendTables[[file]]))
+}
+
 # Mapping ----
 # create map objects at start to make maps more efficiently within dashboard
-map <- leaflet() %>% addProviderTiles(providers$CartoDB.PositronNoLabels)
+map <- leaflet() %>% addProviderTiles(providers$CartoDB.PositronNoLabels) %>%
+  addMapPane("background", zIndex = 400) %>%
+  addMapPane("foreground", zIndex = 500)
 allMap <- map
 
 # Setting up palettes for both PieChart and Map
 habitats <- c("sav" = "Submerged Aquatic Vegetation", "oyster" = "Oyster Reef",
-              "coral" = "Coral Reef", "cw" = "Coastal Wetlands", "nekton" = "Nekton")
+              "coral" = "Coral Reef", "cw" = "Coastal Wetlands", "nekton" = "Water Column (Nekton)")
 habPal <- colorFactor(seacar_sp_palette, habitats, reverse = T)
 
 # Generate data for Overview PieChart
@@ -189,7 +234,8 @@ for(h in habitats){
       data = mapData,
       lat = mapData$lat, lng = mapData$lon, fillColor = pal(mapData$ProgramID),
       rad = mapData$rad, weight = 0.6, fillOpacity = 0.6, group = h, color = "black",
-      opacity = 0.2, popup = mapData$popup, label = mapData$label)
+      opacity = 0.2, popup = mapData$popup, label = mapData$label, 
+      options = pathOptions(pane = "foreground"))
   allMap <- allMap %>%
     addCircleMarkers(
       data = mapData %>% group_by(ProgramLocationID) %>%
@@ -205,14 +251,18 @@ oimmp_pal <- colorFactor("Set3", oimmp$Region)
 chimmp_pal <- colorFactor("Paired", chimmp$Region)
 
 map <- map %>%
-  addMapPane("background", zIndex = 400) %>%
-  addMapPane("foreground", zIndex = 500) %>%
-  addPolygons(data=oimmp, color = "#F0F0F0", weight = 1, smoothFactor = 0.5, 
-              opacity = 1.0, fillOpacity = 0.4, fillColor = ~oimmp_pal(Region), 
-              group="OIMMP Boundary", options = pathOptions(pane = "background")) %>%
-  addPolygons(data=chimmp, color = "#F0F0F0", weight = 1, smoothFactor = 0.5, 
-              opacity = 1.0, fillOpacity = 0.4, fillColor = ~chimmp_pal(Region), 
-              group="CHIMMP Boundary", options = pathOptions(pane = "background"))
+  leaflet::addPolygons(data=oimmp, color = "#F0F0F0", weight = 1, smoothFactor = 0.5,
+                       opacity = 1.0, fillOpacity = 0.4, fillColor = ~oimmp_pal(Region),
+                       group="OIMMP Boundary", options = pathOptions(pane = "background")) %>%
+  leaflet::addPolygons(data=chimmp, color = "#F0F0F0", weight = 1, smoothFactor = 0.5,
+                       opacity = 1.0, fillOpacity = 0.4, fillColor = ~chimmp_pal(Region),
+                       group="CHIMMP Boundary", options = pathOptions(pane = "background")) %>%
+  leaflet.extras::addFullscreenControl()
+
+# Add fullscreen control to allMap, with ability to toggle layers
+allMap <- allMap %>% 
+  addLayersControl(overlayGroups = c(unname(habitats)),
+                   options = layersControlOptions(collapsed=TRUE))
 
 # Add map layer controls (for testing)
 map <- map %>%
@@ -239,7 +289,7 @@ server <- function(input, output, session){
     
     leafletProxy("leafletMap") %>%
       showGroup(habitat) %>%
-      hideGroup(unname(habitats[str_detect(habitats, habitat, negate = T)]))
+      hideGroup(unname(habitats[str_detect(habitats, fixed(habitat), negate = T)]))
     
     # ProgramName is ID used on back-end. names() displays format "PID - PName"
     progs <- unique(data_directory[[input$habitatSelect]][["overviewTable"]]$ProgramName)    
@@ -249,7 +299,11 @@ server <- function(input, output, session){
                          choices = c("All",progs))
     
     updateSelectizeInput(inputId = "maSelect",
-                         choices = c("All",unique(data_directory[[input$habitatSelect]][["maSummTable"]]$ManagedAreaName)))
+                         choices = c("All",sort(unique(data_directory[[input$habitatSelect]][["maSummTable"]]$ManagedAreaName))))
+    
+    updateCheckboxGroupInput(session = session,
+                             inputId = "habitatCheckBox",
+                             selected = input$habitatSelect)
   })
   
   # OIMMP Boundary check box
@@ -294,12 +348,14 @@ server <- function(input, output, session){
   
   param <- reactive({input$paramSelect})
   
-  output$paramPlot <- renderPlot(plotProgramParams(habitat()))
+  output$paramPlot <- renderPlot(plotProgramParams(habitat())) %>%
+    bindCache(habitat())
   
-  output$programPlot <- renderPlot(plotProgramYears(habitat()))
+  output$programPlot <- renderPlot(plotProgramYears(habitat())) %>%
+    bindCache(habitat())
   
   output$pieChart <- renderBillboarder(
-    billboarder() %>% 
+    billboarder(bb_opts = list(legend = list(item = list(onclick = htmlwidgets::JS("function(id) { return false; }"))))) %>%
       bb_piechart(pieData) %>% 
       bb_pie(label = list(format = htmlwidgets::JS("function(value) {return (value);}"),
                           threshold = 0.01)) %>%
@@ -321,28 +377,30 @@ server <- function(input, output, session){
   
   output$allMap <- renderLeaflet(allMap %>% hideGroup(unname(habitats)))
   
-  output$summTable <- renderTable(displaySummaryTable(habitat(), pid(), type="program")) 
+  output$summTable <- renderTable(displaySummaryTable(habitat(), pid(), type="program")) %>%
+    bindCache(habitat(), pid())
   
-  output$maSummTable <- renderTable(displaySummaryTable(habitat(), ma(), type="ma"))
+  output$maSummTable <- renderTable(displaySummaryTable(habitat(), ma(), type="ma")) %>%
+    bindCache(habitat(), ma())
   
   output$programOverviewTable <- DT::renderDT({
     
-    data <- setDT(displayOverviewTable(habitat(), pid(), type="program"))
+    data <- data.table::setDT(displayOverviewTable(habitat(), pid(), type="program"))
     
-    DT::datatable(data[, -c("ProgramName", "pNameID")], escape = F, selection = "none", rownames = F, 
-                  style = "bootstrap", options = list(paging = T))
-  })
+    DT::datatable(data[, -c("ProgramName", "pNameID")], escape = F, selection = "none", 
+                  rownames = F, style = "bootstrap", options = list(paging = T))
+  }, server = FALSE) %>% bindCache(habitat(), pid())
   
   output$maOverviewTable <- DT::renderDT({
     
-    data <- setDT(displayOverviewTable(habitat(), ma(), type="ma") %>% 
-                    filter(!is.na(ManagedAreaName)))
+    data <- data.table::setDT(displayOverviewTable(habitat(), ma(), type="ma") %>% 
+                                filter(!is.na(ManagedAreaName)))
     
     if(!ma()=="All"){data <- data[, -c("ManagedAreaName")]}
     
-    DT::datatable(data, escape = F, selection = "none", rownames = F, 
-                  style = "bootstrap", options = list(paging = T))
-  })
+    DT::datatable(data, escape = F, selection = "none", 
+                  rownames = F, style = "bootstrap", options = list(paging = T))
+  }, server = FALSE) %>% bindCache(habitat(), ma())
   
   output$programInfo <- renderUI({
     if(!pid()=="All"){
@@ -353,7 +411,7 @@ server <- function(input, output, session){
                            unique(programInfo$ProgramID)), pid(), target="_blank")
       )
     }
-  })
+  }) %>% bindCache(habitat(), pid())
   
   output$managedAreaInfo <- renderUI({
     if(!ma()=="All"){
@@ -363,7 +421,7 @@ server <- function(input, output, session){
                            areaID), ma(), target="_blank")
       )
     }
-  })
+  }) %>% bindCache(ma())
   
   output$maPrograms <- renderUI({
     if(!ma()=="All"){
@@ -374,7 +432,7 @@ server <- function(input, output, session){
           tags$br(),
           tagList(tags$ul(purrr::map(progs, function(.x) tags$li(.x)))))
     }
-  })
+  }) %>% bindCache(habitat(), ma())
   
   output$programMAs <- renderUI({
     if(!pid()=="All"){
@@ -384,23 +442,28 @@ server <- function(input, output, session){
                          pull(ManagedAreaName)),
           collapse=", "))
     }
-
-  })
+  }) %>% bindCache(pid())
   
   output$habitatDescription <- renderUI({
     div(style='max-width: fit-content; margin-left: auto; margin-right: auto;',
         tags$h3(habitat()),
         tags$p(habitatText(habitat())))
-  })
+  }) %>% bindCache(habitat())
   
   output$programBoxes <- renderUI({
     params <- plotProgramParams(habitat(), "data")
-    lapply(1:nrow(params), function(i){
-      valueBox(value = paste0(params[i, "n"]),
-               subtitle = params[i, "ParameterName"],
-               width = 4)
+    vbs <- lapply(1:nrow(params), function(i){
+      bslib::value_box(value = paste0(params[i, "n"]),
+                       title = params[i, "ParameterName"],
+                       theme = value_box_theme(bg = "#2E5270", fg = "#C8EAFB"),
+                       class = "vbox")
     })
-  })
+    layout_column_wrap(
+      width = "30%",
+      fixed_width = TRUE,
+      !!!vbs
+    )
+  }) %>% bindCache(habitat())
   
   output$plotLinks <- renderUI({
     if(!ma() == "All"){
@@ -436,9 +499,14 @@ server <- function(input, output, session){
           )
         )
     } else {
-      renderText("Links displayed here")
+      renderUI({
+        tagList(
+          tags$h4("Trends and Visualizations"),
+          tags$p("Select a Managed Area to view available visualizations...")
+        )
+      })
     }
-  })
+  }) %>% bindCache(ma(), habitat())
   
   observeEvent(input$select_button, {
     ma_short <- str_split(input$select_button, "__")[[1]][[1]]
@@ -451,27 +519,30 @@ server <- function(input, output, session){
   
   output$trendTable <- renderTable(
     trendTables(h=habitat(), ma=ma(), plot_type = plot_type())
-  )
+  ) %>% bindCache(habitat(), ma(), plot_type())
   
   observeEvent(input$pieChart_click, {
     updateCheckboxGroupInput(session = session,
                              inputId = "habitatCheckBox",
                              selected = input$pieChart_click$id)
+    updateSelectizeInput(session = session,
+                         inputId = "habitatSelect",
+                         selected = input$pieChart_click$id)
     nav_select(id = "habInfo", selected = input$pieChart_click$id)
   })
   
-  output$discretePrograms <- renderTable(discretePrograms[ParameterName==param(), ])
-  
-  output$discreteProgramPlot <- renderPlot({
-    ggplot(discProgramParams, 
-           aes(x=0, xend=n, y=ParameterName, yend=ParameterName)) +
-      geom_segment(linewidth=10, colour="#4472C4") +
-      geom_text(aes(x=n, label=n, hjust=-0.3), color="black") + 
-      labs(title="Number of Programs for each Parameter",
-           x="Number of Programs",
-           y="Parameter") +
-      plot_theme
-  })
+  # output$discretePrograms <- renderTable(discretePrograms[ParameterName==param(), ])
+  # 
+  # output$discreteProgramPlot <- renderPlot({
+  #   ggplot(discProgramParams, 
+  #          aes(x=0, xend=n, y=ParameterName, yend=ParameterName)) +
+  #     geom_segment(linewidth=10, colour="#4472C4") +
+  #     geom_text(aes(x=n, label=n, hjust=-0.3), color="black") + 
+  #     labs(title="Number of Programs for each Parameter",
+  #          x="Number of Programs",
+  #          y="Parameter") +
+  #     plot_theme
+  # })
   
   output$funding <- renderUI({HTML(funding_text)})
   
