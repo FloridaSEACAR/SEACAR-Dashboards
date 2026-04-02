@@ -465,8 +465,14 @@ ui <- fluidPage(
   useShinyjs(),
   tags$head(
     tags$link(rel = "stylesheet", type = "text/css", href = "www/style.css")),
-  tags$head(includeHTML("www/google-analytics.html")),
-  titlePanel("SEACAR Continuous WQ Dashboard"),
+  # tags$head(includeHTML("www/google-analytics.html")),
+  fluidRow(
+    column(4, titlePanel("SEACAR Continuous WQ Dashboard")),
+    column(7),
+    column(1, 
+           div(a(actionButton("feedbackButton", "Feedback", icon("plus"), class = "btn btn-primary"), 
+                 href = "mailto:SEACAR@FloridaDEP.gov?subject=Feedback for SEACAR Continuous WQ Dashboard"), style = "padding:20px; float: right;"))
+  ),
   fluidRow(
     column(4,
            leafletOutput("map")),

@@ -94,13 +94,8 @@ for(h_file in hab_files){
 }
 
 # Reading in sample locations files (pt)
-sample_loc_date <- "5Mar2025"
-# Locate shape file
-loc_files <- list.files(paste0(seacar_shape_location, "/SampleLocations",sample_loc_date), pattern = ".shp", full.names = TRUE)
-# Filter for correct .shp file
-pt_file <- str_subset(str_subset(loc_files, "_Point"), ".xml", negate = TRUE)
 # Read in point shapefile
-sample_locs_pt <- st_read(pt_file)
+sample_locs_pt <- SEACAR::GeoData$pointLocations
 # Filter for sample locations available in SEACAR combined tables
 sample_locs_pt <- sample_locs_pt %>% 
   filter(LocationID %in% unique(species_sites$LocationID))
