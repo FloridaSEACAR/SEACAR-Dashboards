@@ -253,7 +253,13 @@ ui <- fluidPage(
   tags$head(tags$link(rel = "stylesheet", type = "text/css", href = "www/style.css")),
   # Include google analytics tracking
   tags$head(includeHTML("www/google-analytics.html")),
-  titlePanel("SEACAR Dashboard"),
+  fluidRow(
+    column(4, titlePanel("SEACAR Dashboard")),
+    column(7),
+    column(1, 
+           div(a(actionButton("feedbackButton", "Feedback", icon("plus"), class = "btn btn-primary"), 
+                 href = "mailto:SEACAR@FloridaDEP.gov?subject=Feedback for SEACAR Dashboard"), style = "padding:20px; float: right;"))
+  ),
   overview_page,
   habitats_page,
   fluidRow(

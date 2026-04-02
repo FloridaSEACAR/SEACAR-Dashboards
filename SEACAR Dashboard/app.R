@@ -12,5 +12,5 @@ shinyApp(ui = ui, server = server)
 #                        "rds/allMapData.rds", "rds/data_directory.rds",
 #                        "rds/MA_All.rds", "rds/plot_df.rds", "rds/publish_date.rds",
 #                        "rds/allTrendTables.rds", "rds/oimmp.rds", "rds/chimmp.rds",
-#                        "www/style.css", "www/dep-logos.png", "www/figures/", 
+#                        "www/style.css", "www/dep-logos.png", "www/figures/",
 #                        "www/google-analytics.html"))

@@ -23,28 +23,13 @@ active_date <- ymd(Sys.Date()) - years(1)
 # add publish date beneath funding acknowledgement to show date of latest update
 publish_date <- Sys.Date()
 
-plot_theme <- theme_bw() +
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        text=element_text(family="Arial"),
-        plot.title=element_text(hjust=0.5, size=12, color="#314963"),
-        plot.subtitle=element_text(hjust=0.5, size=10, color="#314963"),
-        legend.title=element_text(size=10),
-        legend.text = element_text(hjust=0),
-        axis.title.x = element_text(size=10, margin = margin(t = 5, r = 0,
-                                                             b = 10, l = 0)),
-        axis.title.y = element_text(size=10, margin = margin(t = 0, r = 10,
-                                                             b = 0, l = 0)),
-        axis.text=element_text(size=10),
-        axis.text.x=element_text(angle = -45, hjust = 0))
+plot_theme <- SEACAR::SEACAR_plot_theme()
 
 source("seacar_data_location.R")
 source("load_shape_samples.R")
 
 # File Import ----
 files <- list.files(seacar_data_location, full.names = T)
-
-# disc_files <- str_subset(str_subset(files, "_WQ_WC_NUT"), "_cont_", negate=T)
 
 sav <- fread(str_subset(files, "SAV"), sep='|', na.strings = "NULL")
 sav <- sav[Include == 1 & MADup==1, ]
@@ -370,8 +355,8 @@ dash_fig_folders <- c("CoastalWetlandsFigures/","CoralPCFigures/","CoralSpeciesR
                       "SAVFigures_common/multiplots", "SAVFigures_common/trendplots")
 original_fig_loc <- "../../SEACAR_Trend_Analyses/"
 original_fig_folders <- c("Coastal_Wetlands/output/Figures/", "Coral/output/PercentCover/Figures/", "Coral/output/SpeciesRichness/Figures/",
-                          "Nekton/output/Figures/", "Oyster/output/Density/Figures/", "Oyster/output/Percent_Live/Figures/", 
-                          "Oyster/output/Shell_Height/Figures/", "SAV/output/website/images/barplots", 
+                          "Nekton/output/Figures/", "Oyster/output/ManagedAreaName/Figures/Density/", "Oyster/output/ManagedAreaName/Figures/Percent_Live/", 
+                          "Oyster/output/ManagedAreaName/Figures/Shell_Height/", "SAV/output/website/images/barplots", 
                           "SAV/output/website/images/multiplots", "SAV/output/website/images/trendplots")
 
 fig_crosswalk <- data.table(
@@ -391,8 +376,10 @@ original_data_loc <- c("Coastal_Wetlands/output/",
 
 copy_files <- function(from, to) {
   # Ensure the full directory exists, not just the parent directory
-  if (!dir.exists(to)) {
+  if(!dir.exists(to)){
     dir.create(to, recursive = TRUE)
+  } else {
+    unlink(paste0(to, "*")) # Remove old files
   }
   # Copy all files from source to destination
   file.copy(list.files(from, full.names = TRUE), to, overwrite = TRUE)
@@ -407,7 +394,11 @@ for(i in seq_len(nrow(fig_crosswalk))){
 sav_wc_figs <- list.files("../../SEACAR_Trend_Analyses/SAV_WC_Analysis/output/", full.names = T, pattern = ".png")
 sav_wc_figs <- str_subset(sav_wc_figs, "Turbidity|TSS|Secchidepth|Chla|CDOM")
 sav_wc_filepath <- "www/figures/SAV_WC_Figures/"
-if(!file.exists(sav_wc_filepath)){dir.create(sav_wc_filepath)}
+if(!file.exists(sav_wc_filepath)){
+  dir.create(sav_wc_filepath) # Create folder if it doesn't exist
+} else {
+  unlink(paste0(sav_wc_filepath, "*")) # remove old files if the folder exists 
+}
 file.copy(sav_wc_figs, "www/figures/SAV_WC_Figures", overwrite = TRUE)
 
 # Copy data
@@ -455,7 +446,7 @@ fig_detect <- function(figures, ma_short, plot_type) {
 
 # Create associations for filepaths in MA_All
 # Function within Server.R will plot on dashboard using these filepaths
-MA_All <- fread("data/ManagedArea.csv")
+MA_All <- SEACAR::ManagedAreas
 MA_All <- MA_All %>% rowwise() %>% mutate(
   multiplot = fig_detect(figures, Abbreviation, "multiplot"),
   trendplot = fig_detect(figures, Abbreviation, "trendplot"),

@@ -1,14 +1,11 @@
 library(sf)
 library(rmapshaper)
 
-sample_date <- "5Mar2025"
-
 # Sample Locations
-point <- st_read(paste0(seacar_shape_location,"/SampleLocations", sample_date, "/seacar_dbo_vw_SampleLocation_Point.shp"))
+point <- SEACAR::GeoData$pointLocations
 
 # ORCP boundaries
-orcp_shp <- st_read(paste0(seacar_shape_location, "/orcp_all_sites/ORCP_Managed_Areas.shp")) %>%
-  st_transform('+proj=longlat +datum=WGS84')
+orcp_shp <- SEACAR::GeoData$`RCP Boundaries`
 
 # OIMMP boundaries
 oimmp <- st_read(paste0(seacar_shape_location, "/OIMMP_Boundaries/OIMMPRegions.shp")) %>%
