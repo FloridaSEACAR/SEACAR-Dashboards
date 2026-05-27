@@ -19,13 +19,13 @@ ul {
 
 .bounding_box_nocol {
   border-radius: 25px;
-  padding:20px;
-  margin:20px;
+  padding:10px;
+  margin:0px;
 }
 
 .vbox {
   border-radius: 1rem;
-  
+
 }
 
 .value-box-value {

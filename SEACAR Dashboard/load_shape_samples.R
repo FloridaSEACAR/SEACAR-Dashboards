@@ -2,7 +2,8 @@ library(sf)
 library(rmapshaper)
 
 # Sample Locations
-point <- SEACAR::GeoData$pointLocations
+pts <- SEACAR::GeoData$pointLocations
+lns <- SEACAR::GeoData$lineLocations
 
 # ORCP boundaries
 orcp_shp <- SEACAR::GeoData$`RCP Boundaries`
