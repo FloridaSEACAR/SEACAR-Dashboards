@@ -50,9 +50,8 @@ data_directory <- list() # Create directory to store grouped results
 for(file in cont_files){
   # Import data
   data <- fread(file, sep='|', na.strings = "NULL")
-  # Find parameter name, region
+  # Find parameter name
   param <- unique(data$ParameterName)
-  region <- unique(data$Region)
   # Group data by PLID & Year, compute Data_N, necessary info
   grouped_df <- data %>%
     group_by(ProgramLocationID, Year) %>%
@@ -60,18 +59,17 @@ for(file in cont_files){
             ProgramID = unique(ProgramID), 
             ProgramName = unique(ProgramName),
             ManagedAreaName = unique(ManagedAreaName),
-            Region = unique(Region),
             Parameter = unique(ParameterName),
             Units = unique(ParameterUnits),
             Lat = unique(OriginalLatitude),
             Lon = unique(OriginalLongitude))
   # Append to data directory
-  data_directory[[param]][[region]] <- grouped_df
-  print(paste0("Processing ", param, " - ", region, " completed"))
+  data_directory[[param]] <- grouped_df
+  print(paste0("Processing ", param, " - completed"))
 }
 # Store final results table
 data <- data.table()
-# Loop through each parameter, binding each region, combine into single file
+# Loop through each parameter, combine into single file
 for(p in names(data_directory)){
   data <- bind_rows(data, bind_rows(data_directory[[p]]))
 }
@@ -172,8 +170,7 @@ map_df <- df %>% group_by(ProgramLocationID, ProgramID, ProgramName, Entity) %>%
             YearMax = max(Year),
             Data_N = sum(Data_N),
             Lat = unique(Lat),
-            Lon = unique(Lon), 
-            Region = unique(Region), .groups = "keep")
+            Lon = unique(Lon), .groups = "keep")
 setDT(map_df)
 map_df[is.na(Entity), `:=` (Entity = ProgramName)]
 
@@ -191,7 +188,7 @@ map_df$Data_N <- formatC(map_df$Data_N, format="d", big.mark = ",")
 
 # Create popup labels to display metadata info
 map_df <- map_df %>%
-  mutate(popup = paste("<br> <b>ProgLocID</b>: ", ProgramLocationID,
+  mutate(popup = paste0("<br> <b>ProgLocID</b>: ", ProgramLocationID,
                        "<br> <b>ProgramName</b> (ID): ", ProgramName," (",ProgramID,")",
                        "<br> <b>Amount of Data</b>: ", Data_N,
                        "<br> <b>Years</b>: ", years,
@@ -206,21 +203,18 @@ program_years <- df %>%
   arrange(Entity, Years)
 setDT(program_years)
 
-# Function to find gaps in years
-find_gaps <- function(years) {
-  if (length(years) == 1) {
-    return(data.frame(startYear = years, endYear = years))
-  }
-  start_years <- c(years[1], years[which(diff(years) != 1)] + 1)
-  end_years <- c(years[which(diff(years) != 1)] - 1, years[length(years)])
-  return(data.frame(startYear = start_years, endYear = end_years))
-}
-
-# Apply function to each entity (For combined gantt plot)
+# Function to find gaps in years for each entity (for gantt plot)
 df_gaps <- program_years %>%
+  arrange(Entity, Years) %>%
   group_by(Entity) %>%
-  summarize(gap_years = list(find_gaps(Years))) %>%
-  unnest(cols = c(gap_years))
+  mutate(gap_id = cumsum(c(1, diff(Years) != 1))) %>%
+  group_by(Entity, gap_id) %>%
+  summarise(
+    startYear = min(Years),
+    endYear = max(Years),
+    .groups = "drop"
+  ) %>%
+  select(-gap_id)
 
 df_gaps$Entity <- factor(df_gaps$Entity,
                          levels = c(highlights,
@@ -236,14 +230,18 @@ site_years <- df %>%
   arrange(ProgramLocationID, Years)
 setDT(site_years)
 
-# Apply function to individual stations within each entity (individual gantt plot)
+# Determine gaps for each individual station within each entity
 df_gaps_by_entity <- site_years %>%
   group_by(Entity, ProgramLocationID, ProgramName) %>%
-  summarize(gap_years = list(find_gaps(Years))) %>%
-  unnest(cols = c(gap_years)) %>%
-  arrange(ProgramName, ProgramLocationID) %>%
-  mutate(Status = ifelse(endYear >= year(active_date), "Active", "Historical"))
-setDT(df_gaps_by_entity)
+  mutate(gap_id = cumsum(c(1, diff(Years) != 1))) %>%
+  group_by(Entity, ProgramLocationID, ProgramName, gap_id) %>%
+  summarise(
+    startYear = min(Years),
+    endYear = max(Years),
+    .groups = "drop"
+  ) %>%
+  mutate(Status = ifelse(endYear >= year(active_date), "Active", "Historical")) %>% 
+  select(-gap_id) %>% as.data.table()
 
 # Entity-level Table display
 table_display <- df %>% 
@@ -259,8 +257,9 @@ table_display <- df %>%
 
 # Formatting to include links
 table_display <- table_display %>%
-  mutate(EntityLink = 
-           ifelse(!is.na(link2), paste0("<a href='",link2,"' target='_blank'>",Entity,"</a>"), Entity))
+  mutate(EntityLink = ifelse(!is.na(link2), 
+                             paste0("<a href='", link2,"' target='_blank'>",Entity,"</a>"), 
+                             Entity))
 
 # Formatting to display commas between data counts
 table_display$Data_N <- formatC(table_display$Data_N, format="d", big.mark = ",")
@@ -276,6 +275,10 @@ table_display_by_entity <- df %>%
 # Load in SKT stats files to grab "SufficientData" column
 skt_combined <- readRDS("data/skt_combined.rds")
 YM_combined <- readRDS("data/YM_combined.rds")
+
+# table_display_by_entity <- table_display_by_entity %>% 
+#   left_join(skt_combined[,c("ProgramLocationID","ParameterName","SufficientData","N_Years")],
+#             join_by("ProgramLocationID" == "ProgramLocationID", "Parameter" == "ParameterName"))
 
 table_display_by_entity <- merge(x=table_display_by_entity,
                                  y=skt_combined[,c("ProgramLocationID",
@@ -299,7 +302,8 @@ table_display_by_entity <- table_display_by_entity %>%
         paste0("button_", Parameter, "_", ProgramLocationID),
         label = paste0(Parameter, " (",N_Years,")"),
         onclick = 'Shiny.onInputChange(\"select_button\",  this.id);'
-    )),paste0(Parameter, " (",N_Years,")")))
+    )), paste0(Parameter, " (",N_Years,")"))) %>%
+  arrange(ProgramName)
 
 # Formatting to display commas between data counts
 table_display_by_entity$Data_N <- formatC(table_display_by_entity$Data_N, format="d", big.mark = ",")
@@ -308,14 +312,33 @@ table_display_by_entity$Data_N <- formatC(table_display_by_entity$Data_N, format
 map_df <- map_df %>% 
   mutate(Status = ifelse(YearMax >= year(active_date), "Active", "Historical"))
 
-# Load Kendall-Tau stats
-kendalltau_results <- fread("data/WQ_Continuous_All_KendallTau_Stats.txt")
+# Add parametervisid to skt_combined and create key column to locate relevant plot
+# skt_combined <- skt_combined %>% left_join(
+#   SEACAR::WebsiteParameters %>% 
+#     filter(SamplingFrequency=="Continuous" & Website==1) %>% 
+#     select(ParameterVisId, ParameterName)
+#   ) %>%
+#   mutate(plot_id = paste0("ma-", AreaID, "-pv-", ParameterVisId))
+
+# Modify skt_combined to include SKT trendline start and end points
+skt_combined <- skt_combined %>%
+  mutate(start_x = decimal_date(EarliestSampleDate),
+         start_y = (start_x-EarliestYear)*SenSlope+SenIntercept,
+         end_x = decimal_date(LastSampleDate),
+         end_y = (end_x-EarliestYear)*SenSlope+SenIntercept) %>%
+  as.data.table()
+
+# Figure caption
+FigCaps <- SEACAR::FigureCaptions[SamplingFrequency=="Continuous"]
+
+# Creating units datatable for display in plots
+cont_param_df <- SEACAR::WebsiteParameters[SamplingFrequency=="Continuous", c("ParameterName", "ParameterUnits")]
 
 # SAVE RDS OBJECTS
 files_to_save <- c("df_gaps", "df_gaps_by_entity", "map_df",
                    "table_display", "table_display_by_entity", "pal",
                    "species_sample_locations_pt", "publish_date", "YM_combined", 
-                   "skt_combined", "kendalltau_results")
+                   "skt_combined", "FigCaps", "cont_param_df")
 for(file in files_to_save){
   saveRDS(get(file), file=paste0("rds/",file,".rds"))
 }
